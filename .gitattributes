@@ -1,0 +1,8 @@
+# This project is built on both Windows and macOS — normalise to LF in the repo
+# so the two platforms don't produce whole-file diffs against each other.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.ico binary
+*.icns binary
