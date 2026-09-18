@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useStore, api } from '../store.js';
+// eslint-disable-next-line no-unused-vars
 import KeyValueEditor from './KeyValueEditor.jsx';
 import { IconClose } from './Icons.jsx';
+import { relativeTime } from '../lib/format.js';
 
 export default function Modals() {
   const modal = useStore((s) => s.modal);
@@ -16,6 +18,8 @@ export default function Modals() {
       {modal.type === 'renameRequest' && <RenameRequest id={modal.id} initial={modal.name} />}
       {modal.type === 'confirm' && <Confirm modal={modal} />}
       {modal.type === 'settings' && <SettingsModal />}
+      {modal.type === 'promote' && <PromoteModal modal={modal} />}
+      {modal.type === 'aiSetup' && <AiSetupModal />}
     </Shell>
   );
 }
@@ -114,15 +118,19 @@ function EnvironmentModal({ id }) {
                     </button>
                   </div>
                 </div>
-                <KeyValueEditor
-                  title="Variables"
-                  rows={env.values || []}
-                  onChange={(values) => call('updateEnvironment', env.id, { values })}
-                  keyPlaceholder="Variable"
-                  valuePlaceholder="Value"
-                  description={false}
-                  emptyNote={<>Reference these anywhere with <code className="mono">{'{{name}}'}</code>.</>}
-                />
+                <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+                  <KeyValueEditor
+                    auto
+                    title="Variables"
+                    rows={env.values || []}
+                    onChange={(values) => call('updateEnvironment', env.id, { values })}
+                    keyPlaceholder="Variable"
+                    valuePlaceholder="Value"
+                    description={false}
+                    emptyNote={<>Reference these anywhere with <code className="mono">{'{{name}}'}</code>.</>}
+                  />
+                  <SourceCurlPanel env={env} />
+                </div>
               </>
             )}
           </div>
@@ -131,6 +139,127 @@ function EnvironmentModal({ id }) {
       <div className="modal-foot">
         <button className="btn" onClick={closeModal}>Done</button>
       </div>
+    </div>
+  );
+}
+
+/**
+ * The source cURL for an environment: paste a fresh one from browser DevTools
+ * and every request in the workspace can be re-pointed at it.
+ */
+function SourceCurlPanel({ env }) {
+  const setSource = useStore((s) => s.setSource);
+  const showToast = useStore((s) => s.showToast);
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const source = env.source;
+
+  const save = async () => {
+    setBusy(true);
+    const result = await setSource(env.id, text);
+    setBusy(false);
+    if (result.ok) {
+      setEditing(false);
+      setText('');
+    }
+  };
+
+  const pasteFromClipboard = async () => {
+    const clip = await api.readClipboard();
+    if (!clip?.trim()) return showToast('Clipboard is empty');
+    setText(clip);
+    setEditing(true);
+  };
+
+  return (
+    <div className="source-panel">
+      <div className="section-head" style={{ padding: '0 0 8px' }}>
+        <span className="section-title">Source cURL</span>
+        <div className="section-actions">
+          {!editing && (
+            <>
+              <button className="link-btn" onClick={pasteFromClipboard}>
+                Paste from clipboard
+              </button>
+              <button
+                className="link-btn"
+                onClick={() => {
+                  setText(source?.curl || '');
+                  setEditing(true);
+                }}
+              >
+                {source ? 'Replace' : 'Add'}
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+
+      <div className="hint" style={{ padding: '0 0 8px' }}>
+        Copy a request from your browser's Network tab as cURL and paste it here. Requests can then pull
+        their headers and host from it, so an expired session is one click to refresh.
+      </div>
+
+      {source && !editing && (
+        <div className="source-summary">
+          <span className="source-origin">{source.origin}</span>
+          <span className="dim">{source.headers.length} headers</span>
+          <span className="dim">captured {relativeTime(source.capturedAt)}</span>
+          <div className="grow" />
+          <button
+            className="link-btn"
+            style={{ color: 'var(--error)' }}
+            onClick={() => setSource(env.id, '')}
+          >
+            Clear
+          </button>
+        </div>
+      )}
+
+      {source && !editing && (
+        <div className="header-pills">
+          {source.headers.map((h, i) => (
+            <span key={i} className="header-pill" title={h.value}>
+              {h.key}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {!source && !editing && (
+        <div className="dim" style={{ fontSize: 12 }}>
+          No source cURL set for this environment.
+        </div>
+      )}
+
+      {editing && (
+        <>
+          <textarea
+            className="source-textarea"
+            autoFocus
+            spellCheck={false}
+            value={text}
+            placeholder={"curl 'https://www.example.com/api/v2/search?q=x' \\\n  -H 'cookie: SID=…' \\\n  -H 'authorization: Bearer …'"}
+            onChange={(e) => setText(e.target.value)}
+          />
+          <div className="row" style={{ marginTop: 8, justifyContent: 'flex-end' }}>
+            <button
+              className="btn btn-sm"
+              onClick={() => {
+                setEditing(false);
+                setText('');
+              }}
+            >
+              Cancel
+            </button>
+            <button className="btn btn-sm btn-primary" disabled={busy || !text.trim()} onClick={save}>
+              {busy ? <span className="spinner" /> : 'Save source'}
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -262,6 +391,138 @@ function Confirm({ modal }) {
   );
 }
 
+/* ---------------------------------------------------------- ai promote */
+
+/** The only path from the AI workspace into the user's. Always user-initiated. */
+function PromoteModal({ modal }) {
+  const collections = useStore((s) => s.state.collections);
+  const promoteFromAi = useStore((s) => s.promoteFromAi);
+  const closeModal = useStore((s) => s.closeModal);
+  const [target, setTarget] = useState(collections[0]?.id || '');
+
+  return (
+    <div className="modal" style={{ maxWidth: 460 }}>
+      <Head title="Add to my workspace" />
+      <div className="modal-body" style={{ padding: 16, lineHeight: 1.8 }}>
+        Copy <strong>{modal.name}</strong> from the AI workspace into your own.
+        <br />
+        <span className="dim">The AI's copy stays where it is; this makes an independent duplicate.</span>
+        <div style={{ marginTop: 14 }}>
+          <label className="section-title" style={{ display: 'block', marginBottom: 6 }}>Add to collection</label>
+          <select className="select" style={{ width: '100%' }} value={target} onChange={(e) => setTarget(e.target.value)}>
+            {collections.map((c) => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+      <div className="modal-foot">
+        <button className="btn" onClick={closeModal}>Cancel</button>
+        <button
+          className="btn btn-primary"
+          onClick={async () => {
+            await promoteFromAi(modal.nodeId, target);
+            closeModal();
+          }}
+        >
+          Add
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ----------------------------------------------------------- ai setup */
+
+function AiSetupModal() {
+  const closeModal = useStore((s) => s.closeModal);
+  const showToast = useStore((s) => s.showToast);
+  const [info, setInfo] = useState(null);
+
+  useEffect(() => {
+    api.aiSetupInfo().then(setInfo);
+  }, []);
+
+  const copy = (text, label) => {
+    api.copyToClipboard(text);
+    showToast(`${label} copied`);
+  };
+
+  return (
+    <div className="modal" style={{ maxWidth: 680 }}>
+      <Head title="Connect an AI assistant" />
+      <div className="modal-body" style={{ padding: 16, lineHeight: 1.8 }}>
+        {!info ? (
+          <span className="dim">Loading…</span>
+        ) : (
+          <>
+            <p>
+              An AI assistant can create and run requests in this app. It works in its own separate
+              workspace — it <strong>cannot change or delete your requests</strong>, and anything it builds
+              only reaches your collections if you add it yourself.
+            </p>
+
+            <div className="setup-step">
+              <div className="setup-num">1</div>
+              <div>
+                <strong>Claude Code</strong> — run this once, in a terminal on <em>this</em> machine:
+                <div className="code-row">
+                  <code className="mono">{info.claudeCodeCommand}</code>
+                  <button className="btn btn-sm" onClick={() => copy(info.claudeCodeCommand, 'Command')}>Copy</button>
+                </div>
+                <details style={{ marginTop: 6 }}>
+                  <summary className="dim" style={{ cursor: 'pointer', fontSize: 11.5 }}>
+                    Using PowerShell? Use this instead
+                  </summary>
+                  <div className="code-row">
+                    <code className="mono">{info.powershellCommand}</code>
+                    <button className="btn btn-sm" onClick={() => copy(info.powershellCommand, 'Command')}>Copy</button>
+                  </div>
+                  <span className="dim" style={{ fontSize: 11 }}>
+                    PowerShell consumes the <code className="mono">--</code> separator before the CLI sees it.
+                  </span>
+                </details>
+              </div>
+            </div>
+
+            <div className="setup-step">
+              <div className="setup-num">2</div>
+              <div>
+                <strong>Claude Desktop</strong> — or add this to its MCP config file:
+                <div className="code-row">
+                  <pre className="mono setup-json">{info.configJson}</pre>
+                  <button className="btn btn-sm" onClick={() => copy(info.configJson, 'Config')}>Copy</button>
+                </div>
+              </div>
+            </div>
+
+            <div className="setup-step">
+              <div className="setup-num">3</div>
+              <div>
+                Ask it something, for example:
+                <br />
+                <em className="dim">"Check API Client is running, then create a request for https://httpbin.org/get and send it."</em>
+              </div>
+            </div>
+
+            <p className="dim" style={{ fontSize: 12 }}>
+              Keep this app open — the assistant talks to it on 127.0.0.1:{info.port}, reachable only from
+              this machine, so Claude Code must run here too.
+              {info.packaged
+                ? ' No separate Node install is needed; the app provides its own runtime.'
+                : ' (Running from source, so this uses the Node on your PATH.)'}
+              {info.hasToken && ' Your control token is included above.'}
+            </p>
+          </>
+        )}
+      </div>
+      <div className="modal-foot">
+        <button className="btn" onClick={closeModal}>Done</button>
+      </div>
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------ settings */
 
 function SettingsModal() {
@@ -386,6 +647,8 @@ function SettingsModal() {
             <div className="error-box" style={{ margin: '0 16px 14px' }}>{control.error}</div>
           )}
         </div>
+
+        <AiGuardrailsSection settings={settings} />
       </div>
       <div className="modal-foot">
         <button className="btn" onClick={closeModal}>Done</button>
@@ -393,3 +656,95 @@ function SettingsModal() {
     </div>
   );
 }
+
+/**
+ * Guardrails apply to AI sessions only. Requests you send yourself are never
+ * checked — this is about bounding what a language model can reach.
+ */
+function AiGuardrailsSection({ settings }) {
+  const call = useStore((s) => s.call);
+  const showToast = useStore((s) => s.showToast);
+  const openModal = useStore((s) => s.openModal);
+  const policy = settings.aiPolicy || {};
+
+  const savePolicy = async (patch) => {
+    const next = await api.aiSetPolicy({ ...policy, ...patch });
+    await useStore.getState().refresh();
+    return next;
+  };
+
+  return (
+    <div style={{ borderTop: '1px solid var(--border)' }}>
+      <div className="section-head">
+        <span className="section-title">AI guardrails</span>
+        <button className="link-btn" onClick={() => openModal({ type: 'aiSetup' })}>
+          Connect an AI
+        </button>
+      </div>
+      <div className="hint" style={{ lineHeight: 1.8 }}>
+        These apply to AI sessions only — never to requests you send yourself.
+        <br />
+        AI sessions work in a separate workspace and cannot modify your requests.
+      </div>
+
+      <div className="field-grid" style={{ maxWidth: 'none', paddingTop: 0 }}>
+        <label>Enforce guardrails</label>
+        <div>
+          <input
+            type="checkbox"
+            checked={policy.enabled !== false}
+            onChange={(e) => savePolicy({ enabled: e.target.checked })}
+          />
+        </div>
+
+        <label>Blocked methods</label>
+        <input
+          className="text-input"
+          defaultValue={(policy.blockedMethods || []).join(', ')}
+          placeholder="DELETE, PUT"
+          onBlur={(e) => savePolicy({ blockedMethods: e.target.value })}
+        />
+
+        <label>Blocked hosts</label>
+        <input
+          className="text-input"
+          defaultValue={(policy.blockedHosts || []).join(', ')}
+          placeholder="api.prod.com, *.internal.company.com"
+          onBlur={(e) => savePolicy({ blockedHosts: e.target.value })}
+        />
+
+        <label />
+        <span className="dim" style={{ fontSize: 11.5 }}>
+          Comma separated. <code className="mono">*.prod.com</code> covers subdomains and the bare domain;
+          a plain hostname matches only itself. Checked on every redirect hop too.
+        </span>
+
+        <label>Session workspaces</label>
+        <select
+          className="select"
+          value={settings.aiSessionMode || 'per-session'}
+          onChange={(e) => call('patchSettings', { aiSessionMode: e.target.value })}
+        >
+          <option value="per-session">One folder per AI session</option>
+          <option value="shared">One shared folder for all sessions</option>
+        </select>
+
+        <label>Let AI edit my requests</label>
+        <div>
+          <input
+            type="checkbox"
+            checked={settings.allowAgentUserWrites === true}
+            onChange={(e) => {
+              call('patchSettings', { allowAgentUserWrites: e.target.checked });
+              if (e.target.checked) showToast('AI can now modify your own requests directly');
+            }}
+          />
+          <span className="dim" style={{ marginLeft: 8, fontSize: 11.5 }}>
+            Off by default. Leave it off unless you want an agent editing your workspace in place.
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+

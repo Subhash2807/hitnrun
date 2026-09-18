@@ -16,13 +16,29 @@ const { parseCurl, toCurl } = require('./curl');
 const { execute } = require('./runner');
 const { buildScope } = require('./resolve');
 const { defaultRequest } = require('./workspace');
+const { parseSource, buildPatch, syncState, describeChanges } = require('./sync');
 
 class ControlServer {
-  constructor({ workspace, onEvent }) {
+  constructor({ workspace, aiWorkspace, onEvent }) {
     this.workspace = workspace;
+    this.aiWorkspace = aiWorkspace;
     this.onEvent = onEvent || (() => {});
     this.server = null;
     this.port = null;
+  }
+
+  /** The AI guardrail policy, as configured in Settings. */
+  _policy() {
+    return this.workspace.getState().settings?.aiPolicy || {};
+  }
+
+  /**
+   * Writes to the USER workspace are refused by default. AI sessions have their
+   * own workspace; this is the wall between them. The user can lower it in
+   * Settings when they deliberately want an agent editing their requests.
+   */
+  _userWritesAllowed() {
+    return this.workspace.getState().settings?.allowAgentUserWrites === true;
   }
 
   start(port = 47600) {
@@ -122,6 +138,11 @@ class ControlServer {
             'GET /variables': 'resolved variable scope',
             'PUT /variables/:key': '{ value, scope: environment|globals }',
             'GET /history': 'recent runs (?limit=)',
+            'PUT /sync/source': '{ curl, environmentId? } -> set the environment source cURL (omit curl to clear)',
+            'GET /sync/source': 'the active environment source cURL',
+            'GET /sync/status': 'which requests are in sync / drifted',
+            'POST /requests/:id/sync': 'pull headers + host from the source cURL',
+            'POST /collections/:id/sync': 'sync every request in a collection or folder',
             'POST /ui/open': '{ requestId } -> open it in a tab and focus the window',
           },
         },
@@ -130,6 +151,23 @@ class ControlServer {
 
     if (root === 'health') return { body: { ok: true, port: this.port, requests: countRequests(ws) } };
     if (root === 'state') return { body: ws.getState() };
+
+    /* ----------------------------------------------------------------- ai */
+    if (root === 'ai') return this._routeAi(method, seg, url, body);
+
+    // Everything below touches the USER workspace. Reads are always fine;
+    // writes need the wall lowered explicitly.
+    if (['POST', 'PATCH', 'PUT', 'DELETE'].includes(method) && !this._userWritesAllowed()) {
+      return {
+        status: 403,
+        body: {
+          error:
+            'Writing to the user workspace is disabled. AI sessions have their own workspace — use the /ai/* endpoints, ' +
+            'or copy what you need with POST /ai/copy. The user can allow direct writes in Settings → AI guardrails.',
+          userWritesDisabled: true,
+        },
+      };
+    }
 
     /* ------------------------------------------------------- collections */
     if (root === 'collections') {
@@ -303,6 +341,74 @@ class ControlServer {
       }
     }
 
+    /* --------------------------------------------------------------- sync */
+    if (root === 'sync') {
+      // Refresh the active environment's source cURL — the call an agent makes
+      // after grabbing a fresh one out of the browser.
+      if (method === 'PUT' && id === 'source') {
+        const state = ws.getState();
+        const envId = body?.environmentId || state.activeEnvironmentId;
+        if (!envId) return { status: 400, body: { error: 'No active environment. Activate one or pass environmentId.' } };
+
+        if (!body?.curl) {
+          ws.setEnvironmentSource(envId, null);
+          this.onEvent({ type: 'sync:source', environmentId: envId });
+          return { body: { cleared: true } };
+        }
+        const parsed = parseSource(body.curl);
+        if (!parsed.ok) return { status: 400, body: { error: parsed.error } };
+        ws.setEnvironmentSource(envId, parsed.source);
+        this.onEvent({ type: 'sync:source', environmentId: envId });
+        return {
+          body: {
+            environmentId: envId,
+            origin: parsed.source.origin,
+            headerCount: parsed.source.headers.length,
+            headers: parsed.source.headers.map((h) => h.key),
+          },
+        };
+      }
+
+      if (method === 'GET' && id === 'source') {
+        const source = ws.activeSource();
+        return source ? { body: source } : { status: 404, body: { error: 'No source cURL on the active environment' } };
+      }
+
+      // Drift report across the whole workspace.
+      if (method === 'GET' && id === 'status') {
+        const source = ws.activeSource();
+        const out = [];
+        for (const hit of ws.walk()) {
+          if (!hit.request) continue;
+          const state = syncState(hit.request, source);
+          out.push({
+            id: hit.request.id,
+            name: hit.request.name,
+            collection: hit.collection.name,
+            state: state.state,
+            changes: state.changes,
+          });
+        }
+        return { body: { hasSource: !!source, origin: source?.origin ?? null, requests: out } };
+      }
+    }
+
+    if (root === 'requests' && id && action === 'sync' && method === 'POST') {
+      const hit = ws.findRequest(id);
+      if (!hit) return { status: 404, body: { error: 'Request not found' } };
+      const result = this._sync([hit.request]);
+      this.onEvent({ type: 'request:updated', requestId: id });
+      return result.ok ? { body: result } : { status: 400, body: result };
+    }
+
+    if (root === 'collections' && id && action === 'sync' && method === 'POST') {
+      const requests = ws.requestsIn(id);
+      if (!requests.length) return { status: 404, body: { error: 'No requests in that collection or folder' } };
+      const result = this._sync(requests);
+      this.onEvent({ type: 'request:updated' });
+      return result.ok ? { body: result } : { status: 400, body: result };
+    }
+
     /* ---------------------------------------------------------------- ui */
     if (root === 'ui' && id === 'open' && method === 'POST') {
       this.onEvent({ type: 'ui:open', requestId: body?.requestId, focus: true });
@@ -310,6 +416,210 @@ class ControlServer {
     }
 
     return { status: 404, body: { error: `No route for ${method} /${seg.join('/')}` } };
+  }
+
+  /**
+   * The AI-facing API. Everything here writes to the AI workspace only; the
+   * user's requests are reachable read-only, and by copy.
+   */
+  async _routeAi(method, seg, url, body) {
+    const ai = this.aiWorkspace;
+    const [, section, id, action] = seg;
+
+    if (!ai) return { status: 503, body: { error: 'AI workspace is not available' } };
+
+    /* ------------------------------------------------------------ sessions */
+    if (section === 'sessions') {
+      if (method === 'POST' && !id) {
+        const mode = this.workspace.getState().settings?.aiSessionMode || 'per-session';
+        const started = ai.startSession({
+          client: body?.client || 'agent',
+          label: body?.label,
+          mode,
+        });
+        this.onEvent({ type: 'ai:session', sessionId: started.sessionId });
+        return {
+          status: 201,
+          body: {
+            ...started,
+            policy: this._policy(),
+            note:
+              'Work only inside this session. You cannot modify the user\'s saved requests; ' +
+              'copy anything you need with POST /ai/copy.',
+          },
+        };
+      }
+      if (method === 'GET' && !id) return { body: ai.listSessions() };
+      if (method === 'DELETE' && id) {
+        const done = ai.discardSession(id);
+        this.onEvent({ type: 'ai:session' });
+        return done ? { body: { discarded: true } } : { status: 404, body: { error: 'Session not found' } };
+      }
+    }
+
+    /* ----------------------------------------------------------- workspace */
+    if (section === 'workspace' && method === 'GET') {
+      return { body: { collections: ai.getState().collections, sessions: ai.listSessions() } };
+    }
+
+    if (section === 'policy' && method === 'GET') {
+      return {
+        body: {
+          ...this._policy(),
+          explanation:
+            'These rules apply to AI sessions only. Blocked methods and hosts are refused before the request leaves the machine, including across redirects.',
+        },
+      };
+    }
+
+    /* --------------------------------------------------------------- copy */
+    if (section === 'copy' && method === 'POST') {
+      if (!body?.sessionId) return { status: 400, body: { error: 'sessionId is required' } };
+      if (!body?.sourceId) return { status: 400, body: { error: 'sourceId is required (a request, folder or collection id from the user workspace)' } };
+      const result = ai.copyFromUser(body.sessionId, body.sourceId);
+      this.onEvent({ type: 'ai:changed' });
+      return result.ok ? { status: 201, body: result } : { status: 400, body: result };
+    }
+
+    /* ------------------------------------------------------------ folders */
+    if (section === 'folders' && method === 'POST') {
+      const folder = ai.createFolder(body?.sessionId, body?.name || 'New Folder', body?.folderId);
+      if (!folder) return { status: 400, body: { error: 'Unknown AI session' } };
+      this.onEvent({ type: 'ai:changed' });
+      return { status: 201, body: folder };
+    }
+
+    /* ----------------------------------------------------------- requests */
+    if (section === 'requests') {
+      if (method === 'POST' && !id) {
+        let fields;
+        if (body?.curl) {
+          const parsed = parseCurl(body.curl);
+          if (!parsed.ok) return { status: 400, body: { error: parsed.error } };
+          fields = parsed.request;
+          if (body.name) fields.name = body.name;
+        } else {
+          fields = pickRequestFields(body || {});
+        }
+        const created = ai.createRequest(body?.sessionId, fields, body?.folderId);
+        if (!created) return { status: 400, body: { error: 'Unknown AI session. Call POST /ai/sessions first.' } };
+        ai.touchSession(body.sessionId);
+        this.onEvent({ type: 'ai:changed' });
+        return { status: 201, body: { ...created, curl: toCurl(created) } };
+      }
+
+      if (method === 'GET' && id) {
+        const hit = ai.findRequest(id);
+        return hit ? { body: hit.request } : { status: 404, body: { error: 'Request not found in the AI workspace' } };
+      }
+
+      if (method === 'PATCH' && id) {
+        const hit = ai.findRequest(id);
+        if (!hit) {
+          return {
+            status: 404,
+            body: { error: 'Request not found in the AI workspace. You cannot edit the user\'s requests — copy it first with POST /ai/copy.' },
+          };
+        }
+        let patch;
+        if (body?.curl) {
+          const parsed = parseCurl(body.curl);
+          if (!parsed.ok) return { status: 400, body: { error: parsed.error } };
+          patch = parsed.request;
+          delete patch.name;
+        } else {
+          patch = pickRequestFields(body || {});
+        }
+        const updated = ai.updateRequest(id, patch);
+        this.onEvent({ type: 'ai:changed' });
+        return { body: updated };
+      }
+
+      if (method === 'DELETE' && id) {
+        const done = ai.deleteRequest(id);
+        this.onEvent({ type: 'ai:changed' });
+        return done ? { body: { deleted: true } } : { status: 404, body: { error: 'Request not found in the AI workspace' } };
+      }
+
+      if (method === 'POST' && id && action === 'send') {
+        const hit = ai.findRequest(id);
+        if (!hit) return { status: 404, body: { error: 'Request not found in the AI workspace' } };
+        return this._aiSend(hit.request, hit.collection);
+      }
+    }
+
+    /* -------------------------------------------------------------- adhoc */
+    if (section === 'send' && method === 'POST') {
+      let fields;
+      if (body?.curl) {
+        const parsed = parseCurl(body.curl);
+        if (!parsed.ok) return { status: 400, body: { error: parsed.error } };
+        fields = parsed.request;
+      } else {
+        fields = pickRequestFields(body || {});
+      }
+      return this._aiSend(defaultRequest(fields), null);
+    }
+
+    return { status: 404, body: { error: `No AI route for ${method} /${seg.join('/')}` } };
+  }
+
+  /** Run a request under AI guardrails, resolving variables from the user's environments. */
+  async _aiSend(request, collection) {
+    const policy = this._policy();
+    const userState = this.workspace.getState();
+
+    const result = await execute(this.aiWorkspace.store, request, {
+      collection,
+      policy,
+      // Read-only view of the user's variables, so copied requests still resolve.
+      varSource: {
+        globals: [...(userState.globals || []), ...(this.aiWorkspace.getState().globals || [])],
+        environments: userState.environments,
+        activeEnvironmentId: userState.activeEnvironmentId,
+        settings: userState.settings,
+      },
+    });
+
+    this.onEvent({ type: 'ai:changed' });
+
+    if (result.response?.blocked) {
+      return {
+        status: 403,
+        body: {
+          blocked: true,
+          reason: result.response.error.message,
+          policy: { blockedHosts: policy.blockedHosts, blockedMethods: policy.blockedMethods },
+        },
+      };
+    }
+    return { body: presentResult(result) };
+  }
+
+  /** Shared by the per-request and per-collection sync routes. */
+  _sync(requests) {
+    const source = this.workspace.activeSource();
+    if (!source) return { ok: false, error: 'The active environment has no source cURL' };
+
+    const out = { ok: true, origin: source.origin, synced: 0, alreadyInSync: 0, exempt: 0, details: [] };
+    for (const request of requests) {
+      const before = syncState(request, source);
+      if (before.state === 'exempt') {
+        out.exempt++;
+        out.details.push({ id: request.id, name: request.name, outcome: 'exempt' });
+        continue;
+      }
+      if (before.state === 'synced') {
+        out.alreadyInSync++;
+        out.details.push({ id: request.id, name: request.name, outcome: 'already-in-sync' });
+        continue;
+      }
+      const changes = describeChanges(request, source);
+      this.workspace.applySyncPatch(request.id, buildPatch(request, source));
+      out.synced++;
+      out.details.push({ id: request.id, name: request.name, outcome: 'synced', changes });
+    }
+    return out;
   }
 }
 

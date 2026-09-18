@@ -78,6 +78,49 @@ pm.environment.set('token', pm.response.json().access_token);
 
 Then use `{{token}}` in every other request.
 
+### Source cURL — refreshing an expired session
+
+The daily problem this solves: you copy a request out of your browser's Network
+tab, and a few hours later its cookies and tokens expire. Re-pasting headers
+into twenty requests by hand is the worst part of API testing.
+
+Instead, give an **environment** a single **source cURL**
+(Environments → pick one → *Source cURL* → paste). Every request then shows a
+chip telling you whether it still matches:
+
+| | |
+|---|---|
+| 🟢 **In sync** | headers and host match the source |
+| 🟠 **Out of sync** | click it to refresh — hover first to see exactly what will change |
+| ⚪ **Not synced** | this request is excluded (⋯ → *Exclude from source sync*) |
+
+Drifted requests also get a small amber dot in the sidebar.
+
+**Scope is always yours to choose.** The chip syncs the one request you're
+looking at. A folder or collection ⋯ → *Sync all with source cURL* syncs
+everything inside it, recursively.
+
+What a sync does:
+
+- **Headers** are replaced by the source's set. A request **with a body keeps its
+  own `Content-Type` / `Content-Length`**, because the browser request almost
+  never has the right one for your payload.
+- **The origin** (scheme + host + port) is replaced by the source's. The path,
+  query params, path variables, method and body are left completely alone —
+  `https://old.example.com/v2/orders?limit=10` becomes
+  `https://www.google.com/v2/orders?limit=10`.
+- **Auth** is set to *None* if the source carries an `Authorization` header, so
+  the two can't emit conflicting headers.
+
+A URL built on a variable (`{{base_url}}/v2/orders`) has no literal host, so
+only its headers sync — the URL is untouched.
+
+Because scope is explicit, the origin rewrite is unconditional within it: group
+requests per service in folders and sync the folder you mean.
+
+To refresh everything after a new login: paste the new cURL onto the
+environment, then ⋯ → *Sync all* on the collection.
+
 **Response** — pretty / raw / preview views, headers, parsed cookies, test
 results, and the script console. Timing and size on every send. Redirects are
 followed manually so each hop is recorded.
@@ -94,6 +137,88 @@ followed manually so each hop is recorded.
 | `Ctrl/Cmd + W` | Close tab |
 
 ---
+
+## Letting an AI assistant use the app
+
+The assistant talks to the app over **127.0.0.1**, so both must run on the
+**same machine**. There is no remote mode — this is deliberate, and it is why
+nothing off-machine can drive your API client.
+
+On whichever machine you are using:
+
+1. Install and start API Client.
+2. Install Claude Code there.
+3. Open **Sidebar → AI → Set up AI access** and copy the command it shows.
+   The path is generated for *that* machine, so it is always correct.
+
+```bash
+claude mcp add api-client --scope user --env API_CLIENT_PORT=47600 \
+  -- node "<path>/mcp/server.js"
+```
+
+Then ask: *"Check API Client is running, then build me a request for
+https://httpbin.org/get and send it."*
+
+Claude Desktop takes the equivalent JSON, shown on the same screen.
+
+**PowerShell users:** that command fails if pasted into PowerShell, which
+consumes the `--` separator before the CLI sees it. The setup screen has a
+PowerShell-safe variant behind a disclosure — or just use Git Bash / cmd.
+
+**An installed copy needs no Node.** Electron ships a Node runtime, and the
+setup screen wires the MCP server to run through the app's own binary via
+`ELECTRON_RUN_AS_NODE`. Running from source uses the Node on your PATH instead.
+
+To remove it again: `claude mcp remove api-client --scope user`.
+
+### The AI works in its own workspace
+
+An assistant **cannot modify or delete anything you own**. It gets a separate
+workspace, stored in a separate file (`ai-workspace.json`), so the isolation
+survives bugs rather than depending on checks being right everywhere.
+
+| The AI can | The AI cannot |
+|---|---|
+| Read your requests, collections and variables | Edit or delete any request you own |
+| Copy your folder into its own workspace and work on the copy | Write anything into your collections |
+| Create, edit, send and delete **its own** requests | Promote its own work into your workspace |
+| See which requests have drifted from the source cURL | Reach a blocked host or method |
+
+Each AI session gets its own folder under the **AI** tab, labelled with the
+client and start time. (Settings can switch this to one shared folder.)
+
+**Promotion is yours alone.** When the AI builds something useful, you click
+**Add** on it and choose which collection it joins. There is no API route for
+promotion at all — it exists only in the UI, so an agent cannot promote itself.
+Discarding a session deletes everything it made and touches nothing of yours.
+
+### Guardrails
+
+**Settings → AI guardrails.** These apply to AI sessions only — requests you
+send yourself are never checked.
+
+- **Blocked methods** — `DELETE` by default.
+- **Blocked hosts** — e.g. `api.prod.com, *.internal.company.com`.
+  `*.prod.com` covers subdomains and the bare domain; a plain hostname matches
+  only itself.
+
+Both are denylists: everything unnamed stays allowed, so ordinary testing is
+frictionless while the irreversible things are impossible.
+
+Blocks are enforced in the main process before the request leaves the machine,
+and **re-checked on every redirect hop** — otherwise a 302 from an allowed host
+onto production would walk straight through the host list.
+
+A blocked call returns a clear refusal telling the assistant not to work around
+it and to ask you instead.
+
+> Worth knowing: workspace isolation protects your *saved requests*. Guardrails
+> are what protect the *APIs you're testing*. If the AI copies a folder, it
+> copies your live session headers with it — which is the point, and also why
+> the production host list matters.
+
+**Settings → Let AI edit my requests** lowers the wall deliberately if you ever
+want an agent editing your workspace in place. Off by default.
 
 ## Driving it from Claude Code or another terminal agent
 
@@ -161,7 +286,25 @@ curl -X POST 127.0.0.1:47600/send \
 | `GET` | `/variables` | resolved variable scope |
 | `PUT` | `/variables/:key` | `{ value, scope }` |
 | `GET` | `/history` | recent runs (`?limit=`) |
+| `PUT` | `/sync/source` | `{ curl, environmentId? }` — set the source cURL; omit `curl` to clear |
+| `GET` | `/sync/source` | the active environment's source |
+| `GET` | `/sync/status` | which requests are in sync vs drifted, and why |
+| `POST` | `/requests/:id/sync` | pull headers + host from the source |
+| `POST` | `/collections/:id/sync` | sync every request in a collection or folder |
 | `POST` | `/ui/open` | `{ requestId }` — open in a tab and focus the window |
+
+Which makes the whole session refresh a two-liner from a terminal:
+
+```bash
+# paste a fresh browser cURL onto the active environment
+curl -X PUT 127.0.0.1:47600/sync/source \
+  -H 'Content-Type: application/json' \
+  -d '{"curl":"curl https://www.example.com/api ..."}'
+
+# bring every request in a collection up to date
+curl -X POST 127.0.0.1:47600/collections/col_abc/sync
+# -> { "synced": 12, "alreadyInSync": 3, "exempt": 1, "details": [...] }
+```
 
 Port, on/off, and an optional access token are all in **Settings**. The token is
 off by default; when set, send it as `Authorization: Bearer <token>`.

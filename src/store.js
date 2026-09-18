@@ -46,6 +46,11 @@ export const useStore = create((set, get) => ({
   responses: {},
   sending: {},
   progress: {},
+  // requestId -> { state: 'synced'|'drifted'|'exempt'|'no-source', changes: [] }
+  // Computed in the main process and pushed with every workspace change.
+  syncStates: {},
+  // The AI's separate workspace — never merged into `state`.
+  ai: { collections: [], sessions: [] },
   control: { running: false, port: null, error: null },
   toast: null,
   modal: null,
@@ -57,8 +62,13 @@ export const useStore = create((set, get) => ({
     set({ state, ready: true });
 
     api.controlStatus().then((control) => set({ control }));
+    api.syncStates().then((syncStates) => set({ syncStates }));
+    api.aiGetState().then((ai) => set({ ai }));
 
-    api.onWorkspaceChanged(({ state: next }) => {
+    api.onAiChanged((ai) => set({ ai }));
+
+    api.onWorkspaceChanged(({ state: next, syncStates }) => {
+      if (syncStates) set({ syncStates });
       const { pending, drafts } = get();
       // Drop drafts that have already been written through; keep the ones still
       // waiting on a debounce so an incoming broadcast can't undo live typing.
@@ -257,6 +267,73 @@ export const useStore = create((set, get) => ({
       }));
       return result;
     }
+  },
+
+  /* ------------------------------------------------------- ai workspace */
+
+  /** Copy AI work into the user's workspace. Only ever triggered from the UI. */
+  async promoteFromAi(nodeId, targetCollectionId) {
+    const result = await api.aiPromote(nodeId, targetCollectionId);
+    if (!result.ok) {
+      get().showToast(result.error || 'Could not add that');
+      return result;
+    }
+    await get().refresh();
+    get().showToast(`Added "${result.name}" to ${result.into}`);
+    return result;
+  },
+
+  async discardAiSession(sessionId) {
+    await api.aiDiscardSession(sessionId);
+    set({ ai: await api.aiGetState() });
+    get().showToast('AI session discarded');
+  },
+
+  /* -------------------------------------------------- source cURL syncing */
+
+  /** Paste a fresh browser cURL onto an environment. Empty text clears it. */
+  async setSource(envId, curlText) {
+    const result = await api.setSource(envId, curlText);
+    if (!result.ok) {
+      get().showToast(result.error || 'Could not parse that cURL command');
+      return result;
+    }
+    await get().refresh();
+    set({ syncStates: await api.syncStates() });
+    get().showToast(result.source ? `Source set — ${result.source.origin}` : 'Source cURL cleared');
+    return result;
+  },
+
+  /** Sync one request. Flush first so a pending edit isn't overwritten. */
+  async syncRequest(requestId) {
+    await get().flush(requestId);
+    const result = await api.syncRequest(requestId);
+    if (!result.ok) {
+      get().showToast(result.error);
+      return result;
+    }
+    await get().refresh();
+    set({ syncStates: await api.syncStates() });
+    get().showToast(result.synced ? 'Synced with source cURL' : 'Already in sync');
+    return result;
+  },
+
+  /** Sync every request inside a collection or folder. */
+  async syncContainer(containerId) {
+    for (const id of Object.keys(get().drafts)) await get().flush(id);
+    const result = await api.syncContainer(containerId);
+    if (!result.ok) {
+      get().showToast(result.error);
+      return result;
+    }
+    await get().refresh();
+    set({ syncStates: await api.syncStates() });
+
+    const bits = [`${result.synced} synced`];
+    if (result.alreadyInSync) bits.push(`${result.alreadyInSync} already current`);
+    if (result.exempt) bits.push(`${result.exempt} exempt`);
+    get().showToast(bits.join(', '));
+    return result;
   },
 
   /* ------------------------------------------------------ collections etc. */

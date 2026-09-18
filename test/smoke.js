@@ -19,6 +19,7 @@ const { Workspace, defaultRequest } = require('../electron/workspace');
 const { compile } = require('../electron/resolve');
 const { execute } = require('../electron/runner');
 const { ControlServer } = require('../electron/control-server');
+const { parseSource, buildPatch, syncState, describeChanges } = require('../electron/sync');
 
 let passed = 0;
 let failed = 0;
@@ -470,10 +471,179 @@ async function callApi(port, method, urlPath, body) {
     assert.match(result.error.message, /nope/);
   });
 
+  /* ============================================== source cURL syncing */
+  section('Source cURL sync');
+
+  const BROWSER_CURL = `curl 'https://www.google.com/api/v2/search?q=x' \\
+  -H 'cookie: SID=fresh123; HSID=abc' \\
+  -H 'authorization: Bearer tok_fresh' \\
+  -H 'user-agent: Mozilla/5.0' \\
+  -H 'accept-language: en-US'`;
+
+  await test('parses a browser cURL into a source', () => {
+    const r = parseSource(BROWSER_CURL);
+    assert.ok(r.ok, r.error);
+    assert.equal(r.source.origin, 'https://www.google.com');
+    const keys = r.source.headers.map((h) => h.key.toLowerCase());
+    // Authorization must come back as a header, not be left in the auth object.
+    assert.ok(keys.includes('authorization'));
+    assert.ok(keys.includes('cookie'));
+    assert.equal(r.source.headers.length, 4);
+  });
+
+  await test('rejects a cURL with no host', () => {
+    assert.equal(parseSource('curl -X POST').ok, false);
+  });
+
+  await test('replaces the origin but keeps path and query', () => {
+    const { source } = parseSource(BROWSER_CURL);
+    const req = defaultRequest({
+      method: 'GET',
+      url: 'https://old.example.com/v2/orders',
+      params: [{ key: 'limit', value: '10', enabled: true }],
+    });
+    const patch = buildPatch(req, source);
+    assert.equal(patch.url, 'https://www.google.com/v2/orders');
+    // Params live outside the URL string and must be untouched.
+    assert.deepEqual(req.params.map((p) => p.key), ['limit']);
+  });
+
+  await test('keeps path variables and the rest of the path intact', () => {
+    const { source } = parseSource(BROWSER_CURL);
+    const req = defaultRequest({ url: 'https://old.example.com:8443/a/b/:id/c?x=1#frag' });
+    const patch = buildPatch(req, source);
+    assert.equal(patch.url, 'https://www.google.com/a/b/:id/c?x=1#frag');
+  });
+
+  await test('replaces headers wholesale', () => {
+    const { source } = parseSource(BROWSER_CURL);
+    const req = defaultRequest({
+      headers: [
+        { key: 'cookie', value: 'SID=EXPIRED', enabled: true },
+        { key: 'X-My-Trace', value: '1', enabled: true },
+      ],
+    });
+    const patch = buildPatch(req, source);
+    const keys = patch.headers.map((h) => h.key.toLowerCase());
+    assert.ok(keys.includes('cookie'));
+    assert.equal(patch.headers.find((h) => h.key.toLowerCase() === 'cookie').value, 'SID=fresh123; HSID=abc');
+    assert.ok(!keys.includes('x-my-trace'), 'custom headers are dropped by replace semantics');
+  });
+
+  await test('protects Content-Type when the request has a body', () => {
+    const { source } = parseSource(BROWSER_CURL);
+    const req = defaultRequest({
+      method: 'POST',
+      body: { mode: 'raw', rawType: 'json', raw: '{"a":1}' },
+      headers: [{ key: 'Content-Type', value: 'application/json', enabled: true }],
+    });
+    const patch = buildPatch(req, source);
+    const ct = patch.headers.find((h) => h.key.toLowerCase() === 'content-type');
+    assert.ok(ct, 'Content-Type must survive');
+    assert.equal(ct.value, 'application/json');
+  });
+
+  await test('does not invent a Content-Type for a bodyless request', () => {
+    const { source } = parseSource(BROWSER_CURL);
+    const req = defaultRequest({ method: 'GET', headers: [{ key: 'Content-Type', value: 'application/json', enabled: true }] });
+    const patch = buildPatch(req, source);
+    assert.equal(patch.headers.find((h) => h.key.toLowerCase() === 'content-type'), undefined);
+  });
+
+  await test('disables request auth when the source carries Authorization', () => {
+    const { source } = parseSource(BROWSER_CURL);
+    const req = defaultRequest({ auth: { type: 'bearer', token: 'old_token' } });
+    const patch = buildPatch(req, source);
+    assert.equal(patch.auth.type, 'none');
+  });
+
+  await test('leaves a variable-based URL alone', () => {
+    const { source } = parseSource(BROWSER_CURL);
+    const req = defaultRequest({ url: '{{base_url}}/v2/orders' });
+    const patch = buildPatch(req, source);
+    assert.equal(patch.url, undefined, 'no parseable origin means no host rewrite');
+    assert.ok(patch.headers.length > 0, 'headers still sync');
+  });
+
+  await test('reports drifted, then synced after applying', () => {
+    const { source } = parseSource(BROWSER_CURL);
+    const req = defaultRequest({
+      url: 'https://old.example.com/v2/orders',
+      headers: [{ key: 'cookie', value: 'SID=EXPIRED', enabled: true }],
+    });
+    const before = syncState(req, source);
+    assert.equal(before.state, 'drifted');
+    assert.ok(before.changes.includes('headers'));
+    assert.ok(before.changes.includes('host'));
+
+    Object.assign(req, buildPatch(req, source));
+    assert.equal(syncState(req, source).state, 'synced');
+  });
+
+  await test('syncing twice is idempotent', () => {
+    const { source } = parseSource(BROWSER_CURL);
+    const req = defaultRequest({ url: 'https://old.example.com/x' });
+    Object.assign(req, buildPatch(req, source));
+    const once = JSON.stringify(req);
+    Object.assign(req, buildPatch(req, source));
+    assert.equal(JSON.stringify(req), once);
+  });
+
+  await test('honours the per-request exemption', () => {
+    const { source } = parseSource(BROWSER_CURL);
+    const req = defaultRequest({ url: 'https://other.com/x', settings: { syncExempt: true } });
+    assert.equal(syncState(req, source).state, 'exempt');
+  });
+
+  await test('reports no-source when the environment has none', () => {
+    const req = defaultRequest({ url: 'https://a.com' });
+    assert.equal(syncState(req, null).state, 'no-source');
+  });
+
+  await test('describes what would change', () => {
+    const { source } = parseSource(BROWSER_CURL);
+    const req = defaultRequest({
+      url: 'https://old.example.com/v2',
+      headers: [{ key: 'cookie', value: 'SID=EXPIRED', enabled: true }],
+    });
+    const lines = describeChanges(req, source).join(' | ');
+    assert.match(lines, /old\.example\.com.*www\.google\.com/);
+    assert.match(lines, /Headers: 1 updated, 3 added/);
+    assert.match(lines, /Auth: set to None/);
+  });
+
+  await test('an expired session is refreshed across a whole folder', () => {
+    const { ws } = tempWorkspace();
+    const col = ws.getState().collections[0];
+    const env = ws.createEnvironment('Prod', []);
+    ws.setActiveEnvironment(env.id);
+    ws.setEnvironmentSource(env.id, parseSource(BROWSER_CURL).source);
+
+    const stale = { key: 'cookie', value: 'SID=EXPIRED', enabled: true };
+    const a = ws.createRequest(col.id, { name: 'A', url: 'https://old.example.com/a', headers: [{ ...stale }] });
+    const b = ws.createRequest(col.id, { name: 'B', url: 'https://old.example.com/b', headers: [{ ...stale }] });
+
+    const source = ws.activeSource();
+    for (const r of ws.requestsIn(col.id)) {
+      ws.applySyncPatch(r.id, buildPatch(r, source));
+    }
+
+    for (const id of [a.id, b.id]) {
+      const req = ws.findRequest(id).request;
+      assert.equal(syncState(req, source).state, 'synced');
+      assert.match(req.url, /^https:\/\/www\.google\.com\//);
+      assert.equal(req.headers.find((h) => h.key.toLowerCase() === 'cookie').value, 'SID=fresh123; HSID=abc');
+    }
+  });
+
   /* =================================================== control server */
   section('Agent control server');
 
   const { ws: controlWs } = tempWorkspace();
+  // This section exercises the USER-workspace API, which is walled off from
+  // agents by default now that AI sessions have their own workspace. Lower the
+  // wall explicitly — test/sandbox.js covers the locked-by-default behaviour.
+  controlWs.patchSettings({ allowAgentUserWrites: true });
   const events = [];
   const control = new ControlServer({ workspace: controlWs, onEvent: (e) => events.push(e) });
   const started = await control.start(0);
@@ -556,6 +726,63 @@ async function callApi(port, method, urlPath, body) {
     const res = await callApi(cport, 'DELETE', `/requests/${createdId}`);
     assert.equal(res.status, 200);
     assert.equal(controlWs.findRequest(createdId), null);
+  });
+
+  await test('sets a source cURL and reports drift over the API', async () => {
+    const env = await callApi(cport, 'POST', '/environments', { name: 'Browser' });
+    await callApi(cport, 'POST', `/environments/${env.json.id}/activate`);
+
+    const set = await callApi(cport, 'PUT', '/sync/source', { curl: BROWSER_CURL });
+    assert.equal(set.status, 200);
+    assert.equal(set.json.origin, 'https://www.google.com');
+    assert.equal(set.json.headerCount, 4);
+
+    const made = await callApi(cport, 'POST', '/requests', {
+      curl: `curl 'https://old.example.com/v2/orders?limit=10' -H 'cookie: SID=EXPIRED'`,
+    });
+    const status = await callApi(cport, 'GET', '/sync/status');
+    assert.equal(status.json.hasSource, true);
+    const row = status.json.requests.find((r) => r.id === made.json.id);
+    assert.equal(row.state, 'drifted');
+
+    const synced = await callApi(cport, 'POST', `/requests/${made.json.id}/sync`);
+    assert.equal(synced.status, 200);
+    assert.equal(synced.json.synced, 1);
+
+    const after = await callApi(cport, 'GET', `/requests/${made.json.id}`);
+    assert.match(after.json.url, /^https:\/\/www\.google\.com\/v2\/orders$/);
+    assert.equal(after.json.headers.find((h) => h.key.toLowerCase() === 'cookie').value, 'SID=fresh123; HSID=abc');
+    // Query params must survive the host swap.
+    assert.deepEqual(after.json.params.map((p) => [p.key, p.value]), [['limit', '10']]);
+
+    const recheck = await callApi(cport, 'GET', '/sync/status');
+    assert.equal(recheck.json.requests.find((r) => r.id === made.json.id).state, 'synced');
+  });
+
+  await test('syncs a whole collection in one call', async () => {
+    const col = await callApi(cport, 'POST', '/collections', { name: 'Bulk' });
+    for (const path of ['/a', '/b', '/c']) {
+      await callApi(cport, 'POST', '/requests', {
+        collectionId: col.json.id,
+        curl: `curl 'https://stale.example.com${path}' -H 'cookie: SID=EXPIRED'`,
+      });
+    }
+    const res = await callApi(cport, 'POST', `/collections/${col.json.id}/sync`);
+    assert.equal(res.status, 200);
+    assert.equal(res.json.synced, 3);
+
+    const list = await callApi(cport, 'GET', '/requests');
+    const inCol = list.json.filter((r) => r.collectionId === col.json.id);
+    assert.equal(inCol.length, 3);
+    for (const r of inCol) assert.match(r.url, /^https:\/\/www\.google\.com\//);
+  });
+
+  await test('refuses to sync when there is no source', async () => {
+    await callApi(cport, 'PUT', '/sync/source', {});
+    const made = await callApi(cport, 'POST', '/requests', { curl: `curl https://x.com/a` });
+    const res = await callApi(cport, 'POST', `/requests/${made.json.id}/sync`);
+    assert.equal(res.status, 400);
+    assert.match(res.json.error, /no source/i);
   });
 
   await test('404s an unknown route', async () => {

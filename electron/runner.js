@@ -11,6 +11,7 @@
 const { compile, buildScope, resolveString } = require('./resolve');
 const { sendRequest } = require('./http-engine');
 const { runScript } = require('./scripts');
+const { buildGuard } = require('./guardrails');
 
 function makeHandlers(workspace, collection, extraHeaders) {
   const state = workspace.getState();
@@ -79,13 +80,17 @@ function makeHandlers(workspace, collection, extraHeaders) {
  * Run a request. Resolves to a result envelope; transport failures come back
  * as `response.error` rather than a thrown exception.
  */
-async function execute(workspace, request, { collection = null, onProgress, recordHistory = true } = {}) {
+async function execute(
+  workspace,
+  request,
+  { collection = null, onProgress, recordHistory = true, policy = null, varSource = null } = {}
+) {
   const startedAt = Date.now();
   const extraHeaders = [];
   const handlers = makeHandlers(workspace, collection, extraHeaders);
 
   // First pass gives the pre-request script a view of the request.
-  const first = compile(request, workspace.getState(), collection);
+  const first = compile(request, varSource || workspace.getState(), collection);
 
   const pre = runScript(request.scripts?.pre, {
     request: {
@@ -112,8 +117,13 @@ async function execute(workspace, request, { collection = null, onProgress, reco
   }
 
   // Second pass picks up any variables the pre-request script wrote.
-  const { spec, unresolved } = compile(request, workspace.getState(), collection);
+  // `varSource` lets an AI session resolve {{vars}} against the user's
+  // environments read-only, so requests copied out of the user workspace work.
+  const { spec, unresolved } = compile(request, varSource || workspace.getState(), collection);
   spec.headers.push(...extraHeaders);
+
+  // AI sessions carry a policy; sends you make yourself never do.
+  if (policy) spec.options.guard = buildGuard(policy);
 
   if (!spec.url) {
     return {

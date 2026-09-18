@@ -21,6 +21,21 @@ contextBridge.exposeInMainWorld('api', {
   toCurl: (request, options) => ipcRenderer.invoke('curl:generate', request, options),
   looksLikeCurl: (text) => ipcRenderer.invoke('curl:detect', text),
 
+  /* source-cURL sync ------------------------------------------------------ */
+  syncStates: () => ipcRenderer.invoke('sync:states'),
+  setSource: (envId, curlText) => ipcRenderer.invoke('sync:setSource', envId, curlText),
+  syncRequest: (requestId) => ipcRenderer.invoke('sync:request', requestId),
+  syncContainer: (containerId) => ipcRenderer.invoke('sync:container', containerId),
+  describeSync: (requestId) => ipcRenderer.invoke('sync:describe', requestId),
+
+  /* AI workspace ---------------------------------------------------------- */
+  aiGetState: () => ipcRenderer.invoke('ai:getState'),
+  aiPromote: (nodeId, targetCollectionId) => ipcRenderer.invoke('ai:promote', nodeId, targetCollectionId),
+  aiDiscardSession: (sessionId) => ipcRenderer.invoke('ai:discardSession', sessionId),
+  aiSetPolicy: (policy) => ipcRenderer.invoke('ai:setPolicy', policy),
+  aiSetupInfo: () => ipcRenderer.invoke('ai:setupInfo'),
+  onAiChanged: (cb) => subscribe('ai:changed', cb),
+
   /* system --------------------------------------------------------------- */
   pickFile: (options) => ipcRenderer.invoke('dialog:pickFile', options),
   saveFile: (options) => ipcRenderer.invoke('dialog:saveFile', options),

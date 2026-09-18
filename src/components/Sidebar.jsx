@@ -1,9 +1,11 @@
 import { useMemo, useState } from 'react';
 import { useStore, api, walkRequests } from '../store.js';
 import Dropdown, { Item, Separator } from './Dropdown.jsx';
+import { SyncDot } from './SyncIndicator.jsx';
+import AiWorkspacePanel from './AiWorkspacePanel.jsx';
 import {
   IconSearch, IconPlus, IconMore, IconChevronDown, IconChevronRight,
-  IconFolder, IconLayers, IconClock, IconTrash, IconCopy,
+  IconFolder, IconLayers, IconClock, IconTrash, IconCopy, IconSync,
 } from './Icons.jsx';
 import { METHOD_COLORS, relativeTime, statusClass } from '../lib/format.js';
 
@@ -16,9 +18,10 @@ export default function Sidebar() {
     <div className="sidebar" style={{ width: state?.ui?.sidebarWidth || 280 }}>
       <div className="sidebar-tabs">
         {[
-          ['collections', 'Collections', <IconLayers key="i" width={13} height={13} />],
-          ['environments', 'Environments', null],
-          ['history', 'History', <IconClock key="i" width={13} height={13} />],
+          ['collections', 'Collections'],
+          ['environments', 'Env'],
+          ['history', 'History'],
+          ['ai', 'AI'],
         ].map(([id, label]) => (
           <button
             key={id}
@@ -33,6 +36,7 @@ export default function Sidebar() {
       {tab === 'collections' && <CollectionsTree />}
       {tab === 'environments' && <EnvironmentsList />}
       {tab === 'history' && <HistoryList />}
+      {tab === 'ai' && <AiWorkspacePanel />}
     </div>
   );
 }
@@ -43,6 +47,7 @@ function CollectionsTree() {
   const state = useStore((s) => s.state);
   const call = useStore((s) => s.call);
   const createRequest = useStore((s) => s.createRequest);
+  const syncContainer = useStore((s) => s.syncContainer);
   const openModal = useStore((s) => s.openModal);
   const [query, setQuery] = useState('');
   const [collapsed, setCollapsed] = useState({});
@@ -121,6 +126,10 @@ function CollectionsTree() {
                     Rename
                   </Item>
                   <Separator />
+                  <Item onClick={() => syncContainer(collection.id)} icon={<IconSync width={12} height={12} />}>
+                    Sync all with source cURL
+                  </Item>
+                  <Separator />
                   <Item
                     danger
                     icon={<IconTrash width={12} height={12} />}
@@ -162,7 +171,7 @@ function ItemList({ items, depth, collapsed, toggle, matches }) {
 function FolderRow({ folder, depth, collapsed, toggle, matches }) {
   const call = useStore((s) => s.call);
   const createRequest = useStore((s) => s.createRequest);
-  const openModal = useStore((s) => s.openModal);
+  const syncContainer = useStore((s) => s.syncContainer);
 
   return (
     <div>
@@ -183,6 +192,10 @@ function FolderRow({ folder, depth, collapsed, toggle, matches }) {
           >
             <Item onClick={() => createRequest(folder.id)}>Add Request</Item>
             <Item onClick={() => call('createFolder', folder.id, 'New Folder')}>Add Folder</Item>
+            <Separator />
+            <Item onClick={() => syncContainer(folder.id)} icon={<IconSync width={12} height={12} />}>
+              Sync all with source cURL
+            </Item>
           </Dropdown>
         </div>
       </div>
@@ -198,6 +211,7 @@ function RequestRow({ request, depth, matches }) {
   const openTab = useStore((s) => s.openTab);
   const duplicateRequest = useStore((s) => s.duplicateRequest);
   const deleteRequest = useStore((s) => s.deleteRequest);
+  const syncRequest = useStore((s) => s.syncRequest);
   const openModal = useStore((s) => s.openModal);
   const showToast = useStore((s) => s.showToast);
 
@@ -217,6 +231,7 @@ function RequestRow({ request, depth, matches }) {
     >
       <span className={`method-badge ${METHOD_COLORS[request.method] || ''}`}>{request.method}</span>
       <span className="tree-label">{request.name}</span>
+      <SyncDot requestId={request.id} />
       <div className="row-actions" onClick={(e) => e.stopPropagation()}>
         <Dropdown
           align="right"
@@ -229,6 +244,9 @@ function RequestRow({ request, depth, matches }) {
           <Item onClick={() => openTab(request.id)}>Open</Item>
           <Item onClick={() => duplicateRequest(request.id)} icon={<IconCopy width={12} height={12} />}>
             Duplicate
+          </Item>
+          <Item onClick={() => syncRequest(request.id)} icon={<IconSync width={12} height={12} />}>
+            Sync with source cURL
           </Item>
           <Item onClick={copyCurl}>Copy as cURL</Item>
           <Item onClick={() => openModal({ type: 'renameRequest', id: request.id, name: request.name })}>Rename</Item>

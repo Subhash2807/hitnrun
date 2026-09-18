@@ -6,7 +6,8 @@ import BodyEditor from './BodyEditor.jsx';
 import Editor from './Editor.jsx';
 import ResponsePanel from './ResponsePanel.jsx';
 import Dropdown, { Item, Separator } from './Dropdown.jsx';
-import { IconMore, IconCopy, IconTerminal, IconChevronDown } from './Icons.jsx';
+import SyncIndicator from './SyncIndicator.jsx';
+import { IconMore, IconCopy, IconTerminal, IconChevronDown, IconSync } from './Icons.jsx';
 import { METHODS, METHOD_COLORS } from '../lib/format.js';
 import { composeUrl, decomposeUrl, syncPathVars } from '../lib/url.js';
 
@@ -16,6 +17,7 @@ export default function RequestView({ requestId, theme }) {
   const send = useStore((s) => s.send);
   const duplicateRequest = useStore((s) => s.duplicateRequest);
   const deleteRequest = useStore((s) => s.deleteRequest);
+  const syncRequest = useStore((s) => s.syncRequest);
   const openModal = useStore((s) => s.openModal);
   const showToast = useStore((s) => s.showToast);
   const result = useStore((s) => s.responses[requestId]);
@@ -141,6 +143,7 @@ export default function RequestView({ requestId, theme }) {
           />
           <span className="breadcrumb">saved automatically</span>
           <div className="grow" />
+          <SyncIndicator requestId={requestId} />
           <Dropdown
             align="right"
             trigger={(open) => (
@@ -156,6 +159,19 @@ export default function RequestView({ requestId, theme }) {
               Copy as cURL
             </Item>
             <Item onClick={importFromClipboard}>Import cURL from clipboard</Item>
+            <Separator />
+            <Item onClick={() => syncRequest(requestId)} icon={<IconSync width={12} height={12} />}>
+              Sync with source cURL
+            </Item>
+            <Item
+              onClick={() =>
+                patchRequest(requestId, {
+                  settings: { ...request.settings, syncExempt: !request.settings?.syncExempt },
+                })
+              }
+            >
+              {request.settings?.syncExempt ? 'Include in source sync' : 'Exclude from source sync'}
+            </Item>
             <Separator />
             <Item
               danger

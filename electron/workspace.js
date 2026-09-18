@@ -57,6 +57,11 @@ function defaultState() {
       historyLimit: 500,
       controlServer: { enabled: true, port: 47600 },
       autoParseCurl: true,
+      // AI sessions work in their own workspace and cannot write to this one
+      // unless the user deliberately lowers the wall.
+      allowAgentUserWrites: false,
+      aiSessionMode: 'per-session',
+      aiPolicy: { enabled: true, blockedHosts: [], blockedMethods: ['DELETE'] },
     },
     ui: { tabs: [], activeTabId: null, sidebarWidth: 280, sidebarTab: 'collections' },
   };
@@ -283,6 +288,48 @@ class Workspace extends EventEmitter {
     if (this.state.activeEnvironmentId === id) this.state.activeEnvironmentId = null;
     this.touch('environment:delete', id);
     return true;
+  }
+
+  /* ------------------------------------------------------- source cURL */
+
+  /** Store a parsed source cURL on an environment. `null` clears it. */
+  setEnvironmentSource(id, source) {
+    const env = this.state.environments.find((e) => e.id === id);
+    if (!env) return null;
+    env.source = source || null;
+    this.touch('environment:source', id);
+    return env;
+  }
+
+  /** The source belonging to the currently active environment, if any. */
+  activeSource() {
+    const env = this.state.environments.find((e) => e.id === this.state.activeEnvironmentId);
+    return env?.source || null;
+  }
+
+  /** Apply a sync patch to one request. Returns the changed fields, or null. */
+  applySyncPatch(requestId, patch) {
+    const hit = this.findRequest(requestId);
+    if (!hit) return null;
+    Object.assign(hit.request, patch);
+    hit.request.updatedAt = Date.now();
+    this.touch('request:sync', requestId);
+    return hit.request;
+  }
+
+  /** Every request inside a collection or folder, recursively. */
+  requestsIn(containerId) {
+    const container = this.findContainer(containerId);
+    if (!container) return [];
+    const out = [];
+    const visit = (items) => {
+      for (const item of items || []) {
+        if (item.type === 'folder') visit(item.items);
+        else if (item.type === 'request') out.push(item);
+      }
+    };
+    visit(container.items);
+    return out;
   }
 
   setActiveEnvironment(id) {

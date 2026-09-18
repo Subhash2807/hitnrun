@@ -3,10 +3,13 @@
 const { app, BrowserWindow, ipcMain, dialog, clipboard, shell, Menu } = require('electron');
 const path = require('node:path');
 
-const { Workspace, defaultRequest } = require('./workspace');
+const { Workspace, defaultRequest, uid } = require('./workspace');
+const { AiWorkspace } = require('./ai-workspace');
+const { normalizePolicy } = require('./guardrails');
 const { execute } = require('./runner');
 const { parseCurl, toCurl, looksLikeCurl } = require('./curl');
 const { ControlServer } = require('./control-server');
+const { parseSource, buildPatch, syncState, describeChanges } = require('./sync');
 
 // Only `npm run dev` sets this. Running unpackaged (`electron .`) still loads the
 // built bundle, so the window is never blank just because Vite isn't up.
@@ -14,6 +17,7 @@ const isDev = process.env.NODE_ENV === 'development';
 
 let mainWindow = null;
 let workspace = null;
+let aiWorkspace = null;
 let controlServer = null;
 let controlStatus = { running: false, port: null, error: null };
 
@@ -129,6 +133,7 @@ async function startControlServer() {
 
   controlServer = new ControlServer({
     workspace,
+    aiWorkspace,
     onEvent: (event) => {
       mainWindow?.webContents.send('control:event', event);
       if (event.focus && mainWindow) {
@@ -147,9 +152,29 @@ app.whenReady().then(async () => {
   workspace = new Workspace(path.join(app.getPath('userData'), 'workspace.json'));
   workspace.load();
 
+  // Separate file on purpose — the AI never holds a writable handle to the
+  // user's requests, so isolation survives bugs in the AI code paths.
+  aiWorkspace = new AiWorkspace(
+    path.join(app.getPath('userData'), 'ai-workspace.json'),
+    () => workspace.getState()
+  );
+  aiWorkspace.load();
+  aiWorkspace.on('changed', () => {
+    mainWindow?.webContents.send('ai:changed', {
+      collections: aiWorkspace.getState().collections,
+      sessions: aiWorkspace.listSessions(),
+    });
+  });
+
   // Every mutation — from the UI or from an agent — refreshes the window.
+  // Sync states ride along so the indicators never need a second round trip.
   workspace.on('changed', ({ reason, detail, state }) => {
-    mainWindow?.webContents.send('workspace:changed', { reason, detail, state });
+    mainWindow?.webContents.send('workspace:changed', {
+      reason,
+      detail,
+      state,
+      syncStates: computeSyncStates(),
+    });
   });
   workspace.on('error', (err) => console.error('[workspace]', err));
 
@@ -169,6 +194,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   workspace?.saveNow(); // flush any pending debounced write
+  aiWorkspace?.saveNow();
   controlServer?.stop();
 });
 
@@ -185,8 +211,74 @@ const ALLOWED_WS_METHODS = new Set([
   'findRequest',
 ]);
 
+/** Sync state for every request in the workspace, against the active environment. */
+function computeSyncStates() {
+  const source = workspace.activeSource();
+  const map = {};
+  for (const hit of workspace.walk()) {
+    if (hit.request) map[hit.request.id] = syncState(hit.request, source);
+  }
+  return map;
+}
+
+/** Apply the source cURL to a list of requests. Returns a per-request outcome. */
+function syncRequests(requests) {
+  const source = workspace.activeSource();
+  if (!source) return { ok: false, error: 'The active environment has no source cURL' };
+
+  const results = { ok: true, synced: 0, alreadyInSync: 0, exempt: 0, details: [] };
+  for (const request of requests) {
+    const before = syncState(request, source);
+    if (before.state === 'exempt') {
+      results.exempt++;
+      results.details.push({ id: request.id, name: request.name, outcome: 'exempt' });
+      continue;
+    }
+    if (before.state === 'synced') {
+      results.alreadyInSync++;
+      results.details.push({ id: request.id, name: request.name, outcome: 'already-in-sync' });
+      continue;
+    }
+    const changes = describeChanges(request, source);
+    workspace.applySyncPatch(request.id, buildPatch(request, source));
+    results.synced++;
+    results.details.push({ id: request.id, name: request.name, outcome: 'synced', changes });
+  }
+  return results;
+}
+
 function registerIpc() {
   ipcMain.handle('ws:getState', () => workspace.getState());
+  ipcMain.handle('sync:states', () => computeSyncStates());
+
+  ipcMain.handle('sync:setSource', (_e, envId, curlText) => {
+    if (!curlText || !String(curlText).trim()) {
+      workspace.setEnvironmentSource(envId, null);
+      return { ok: true, source: null };
+    }
+    const parsed = parseSource(curlText);
+    if (!parsed.ok) return { ok: false, error: parsed.error };
+    workspace.setEnvironmentSource(envId, parsed.source);
+    return { ok: true, source: parsed.source };
+  });
+
+  ipcMain.handle('sync:request', (_e, requestId) => {
+    const hit = workspace.findRequest(requestId);
+    if (!hit) return { ok: false, error: 'Request not found' };
+    return syncRequests([hit.request]);
+  });
+
+  ipcMain.handle('sync:container', (_e, containerId) => {
+    const requests = workspace.requestsIn(containerId);
+    if (!requests.length) return { ok: false, error: 'Nothing to sync in there' };
+    return syncRequests(requests);
+  });
+
+  ipcMain.handle('sync:describe', (_e, requestId) => {
+    const hit = workspace.findRequest(requestId);
+    if (!hit) return [];
+    return describeChanges(hit.request, workspace.activeSource());
+  });
 
   ipcMain.handle('ws:call', (_e, method, args = []) => {
     if (!ALLOWED_WS_METHODS.has(method)) {
@@ -250,6 +342,99 @@ function registerIpc() {
 
   ipcMain.handle('shell:openExternal', (_e, url) => {
     if (/^https?:\/\//i.test(url)) shell.openExternal(url);
+  });
+
+  /* ---------------------------------------------------------- ai workspace */
+
+  ipcMain.handle('ai:getState', () => ({
+    collections: aiWorkspace.getState().collections,
+    sessions: aiWorkspace.listSessions(),
+  }));
+
+  /**
+   * Promote AI work into the user's workspace. This only ever runs from the UI —
+   * there is no control-server route for it, so an agent cannot promote its own
+   * output. The user decides what crosses the wall.
+   */
+  ipcMain.handle('ai:promote', (_e, nodeId, targetCollectionId) => {
+    const exported = aiWorkspace.exportForPromotion(nodeId);
+    if (!exported) return { ok: false, error: 'Nothing found to promote' };
+
+    let target = workspace.getState().collections.find((c) => c.id === targetCollectionId);
+    if (!target) target = workspace.getState().collections[0] || workspace.createCollection('From AI');
+
+    const node = exported.value;
+    if (node.type === 'request') {
+      target.items.push(node);
+    } else {
+      target.items.push({ ...node, type: 'folder' });
+    }
+    workspace.touch('ai:promoted', node.id);
+    return { ok: true, id: node.id, name: node.name, into: target.name };
+  });
+
+  ipcMain.handle('ai:discardSession', (_e, sessionId) => aiWorkspace.discardSession(sessionId));
+
+  /**
+   * Everything needed to point an MCP client at this app.
+   *
+   * When packaged, mcp/ is kept OUTSIDE the asar archive (see build.asarUnpack)
+   * because Node cannot execute a script from inside one.
+   */
+  ipcMain.handle('ai:setupInfo', () => {
+    const settings = workspace.getState().settings;
+    const port = settings.controlServer?.port || 47600;
+    const token = settings.controlServer?.token || '';
+
+    // Packaged builds run a single esbuild bundle. Shipping the raw source
+    // instead would mean unpacking its whole transitive dependency tree from the
+    // asar, and any dep missed there fails only in the installed copy.
+    const serverPath = app.isPackaged
+      ? path.join(process.resourcesPath, 'app.asar.unpacked', 'mcp', 'server.bundle.js')
+      : path.join(__dirname, '..', 'mcp', 'server.js');
+
+    // An installed copy cannot assume Node exists on the machine. Electron ships
+    // a Node runtime, and ELECTRON_RUN_AS_NODE makes our own binary behave as
+    // one — so the MCP server runs with zero extra prerequisites.
+    const runtime = app.isPackaged ? process.execPath : 'node';
+    const env = {
+      API_CLIENT_PORT: String(port),
+      ...(token ? { API_CLIENT_TOKEN: token } : {}),
+      ...(app.isPackaged ? { ELECTRON_RUN_AS_NODE: '1' } : {}),
+    };
+
+    const envFlags = Object.entries(env)
+      .map(([k, v]) => `--env ${k}=${v}`)
+      .join(' ');
+
+    const quoted = (p) => (p.includes(' ') ? `"${p}"` : p);
+
+    // PowerShell's own `--` handling swallows the separator before the CLI sees
+    // it, so Windows users need the cmd-shim form instead of the bash form.
+    const bashCommand = `claude mcp add api-client --scope user ${envFlags} -- ${quoted(runtime)} "${serverPath}"`;
+    const powershellCommand = `claude.cmd --% mcp add api-client --scope user ${envFlags} -- ${quoted(runtime)} "${serverPath}"`;
+
+    return {
+      serverPath,
+      runtime,
+      port,
+      hasToken: !!token,
+      packaged: app.isPackaged,
+      needsNode: !app.isPackaged,
+      claudeCodeCommand: bashCommand,
+      powershellCommand,
+      configJson: JSON.stringify(
+        { mcpServers: { 'api-client': { command: runtime, args: [serverPath], env } } },
+        null,
+        2
+      ),
+    };
+  });
+
+  ipcMain.handle('ai:setPolicy', (_e, policy) => {
+    const normalized = normalizePolicy(policy);
+    workspace.patchSettings({ aiPolicy: normalized });
+    return normalized;
   });
 
   ipcMain.handle('control:status', () => controlStatus);

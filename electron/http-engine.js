@@ -195,6 +195,20 @@ function sendRequest(spec, { onProgress } = {}) {
     if (!hasHeader(headers, 'accept-encoding')) headers.push(['Accept-Encoding', 'gzip, deflate, br']);
 
     const hop = (currentUrl, currentMethod, currentBody, hopCount) => {
+      // Consulted on every hop, so a redirect can't carry an AI session onto a
+      // blocked host. Returns a reason string to refuse, or null to allow.
+      if (opts.guard) {
+        const refusal = opts.guard(currentUrl.href, currentMethod);
+        if (refusal) {
+          return resolve({
+            error: { message: refusal, code: 'ERR_BLOCKED_BY_POLICY' },
+            blocked: true,
+            timeMs: Date.now() - startedAt,
+            redirects,
+          });
+        }
+      }
+
       const lib = currentUrl.protocol === 'https:' ? https : http;
       const timings = { start: Date.now() };
 

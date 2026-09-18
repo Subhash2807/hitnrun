@@ -9,8 +9,11 @@
   "private": true,
   "scripts": {
     "dev": "concurrently -k -n vite,electron -c cyan,magenta \"vite\" \"wait-on tcp:5173 && cross-env NODE_ENV=development electron .\"",
-    "build": "vite build",
-    "test": "node test/smoke.js",
+    "build": "vite build && npm run build:mcp",
+    "build:mcp": "esbuild mcp/server.js --bundle --platform=node --target=node18 --format=cjs --outfile=mcp/server.bundle.js --log-level=warning",
+    "test": "node test/smoke.js && node test/sandbox.js",
+    "test:mcp": "node test/mcp.js",
+    "mcp": "node mcp/server.js",
     "start": "npm run build && electron .",
     "dist": "vite build && electron-builder",
     "dist:win": "vite build && electron-builder --win",
@@ -22,6 +25,7 @@
     "@codemirror/lang-javascript": "^6.2.2",
     "@codemirror/lang-json": "^6.0.1",
     "@codemirror/lang-xml": "^6.1.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@uiw/codemirror-theme-vscode": "^4.23.7",
     "@uiw/react-codemirror": "^4.23.7",
     "react": "^18.3.1",
@@ -47,13 +51,19 @@
     "files": [
       "dist/**/*",
       "electron/**/*",
+      "mcp/server.bundle.js",
       "package.json"
+    ],
+    "asarUnpack": [
+      "mcp/server.bundle.js"
     ],
     "win": {
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ]
     },
@@ -66,13 +76,18 @@
       "target": [
         {
           "target": "dmg",
-          "arch": ["x64", "arm64"]
+          "arch": [
+            "x64",
+            "arm64"
+          ]
         }
       ],
       "category": "public.app-category.developer-tools"
     },
     "linux": {
-      "target": ["AppImage"],
+      "target": [
+        "AppImage"
+      ],
       "category": "Development"
     }
   }
