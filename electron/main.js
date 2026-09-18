@@ -2,6 +2,7 @@
 
 const { app, BrowserWindow, ipcMain, dialog, clipboard, shell, Menu } = require('electron');
 const path = require('node:path');
+const fs = require('node:fs');
 
 const { Workspace, defaultRequest, uid } = require('./workspace');
 const { AiWorkspace } = require('./ai-workspace');
@@ -120,6 +121,46 @@ function buildMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
+/* --------------------------------------------------------------- migration */
+
+// Electron derives userData from productName, so renaming the app moves the
+// data directory and strands whatever was saved under the old name. Names we
+// have shipped under before, newest first.
+const LEGACY_PRODUCT_NAMES = ['API Client'];
+
+/**
+ * One-time adoption of a previous release's data directory.
+ * Only runs when this build has no workspace of its own, so it can never
+ * overwrite newer data, and the originals are copied rather than moved.
+ */
+function migrateLegacyUserData(dir) {
+  const target = path.join(dir, 'workspace.json');
+  if (fs.existsSync(target)) return null;
+
+  const parent = path.dirname(dir);
+  for (const name of LEGACY_PRODUCT_NAMES) {
+    const legacyDir = path.join(parent, name);
+    const legacyWorkspace = path.join(legacyDir, 'workspace.json');
+    if (!fs.existsSync(legacyWorkspace)) continue;
+
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      fs.copyFileSync(legacyWorkspace, target);
+
+      const legacyAi = path.join(legacyDir, 'ai-workspace.json');
+      if (fs.existsSync(legacyAi)) {
+        fs.copyFileSync(legacyAi, path.join(dir, 'ai-workspace.json'));
+      }
+      console.log(`[migration] adopted saved data from "${name}"`);
+      return legacyDir;
+    } catch (err) {
+      console.error('[migration] failed:', err.message);
+      return null;
+    }
+  }
+  return null;
+}
+
 /* ----------------------------------------------------------------- startup */
 
 async function startControlServer() {
@@ -149,6 +190,8 @@ async function startControlServer() {
 }
 
 app.whenReady().then(async () => {
+  migrateLegacyUserData(app.getPath('userData'));
+
   workspace = new Workspace(path.join(app.getPath('userData'), 'workspace.json'));
   workspace.load();
 
@@ -398,8 +441,8 @@ function registerIpc() {
     // one — so the MCP server runs with zero extra prerequisites.
     const runtime = app.isPackaged ? process.execPath : 'node';
     const env = {
-      API_CLIENT_PORT: String(port),
-      ...(token ? { API_CLIENT_TOKEN: token } : {}),
+      HITNRUN_PORT: String(port),
+      ...(token ? { HITNRUN_TOKEN: token } : {}),
       ...(app.isPackaged ? { ELECTRON_RUN_AS_NODE: '1' } : {}),
     };
 
@@ -411,8 +454,8 @@ function registerIpc() {
 
     // PowerShell's own `--` handling swallows the separator before the CLI sees
     // it, so Windows users need the cmd-shim form instead of the bash form.
-    const bashCommand = `claude mcp add api-client --scope user ${envFlags} -- ${quoted(runtime)} "${serverPath}"`;
-    const powershellCommand = `claude.cmd --% mcp add api-client --scope user ${envFlags} -- ${quoted(runtime)} "${serverPath}"`;
+    const bashCommand = `claude mcp add hitnrun --scope user ${envFlags} -- ${quoted(runtime)} "${serverPath}"`;
+    const powershellCommand = `claude.cmd --% mcp add hitnrun --scope user ${envFlags} -- ${quoted(runtime)} "${serverPath}"`;
 
     return {
       serverPath,
@@ -424,7 +467,7 @@ function registerIpc() {
       claudeCodeCommand: bashCommand,
       powershellCommand,
       configJson: JSON.stringify(
-        { mcpServers: { 'api-client': { command: runtime, args: [serverPath], env } } },
+        { mcpServers: { hitnrun: { command: runtime, args: [serverPath], env } } },
         null,
         2
       ),

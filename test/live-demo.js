@@ -5,7 +5,7 @@
  * Run with the app open: node test/live-demo.js
  */
 
-const BASE = `http://127.0.0.1:${process.env.API_CLIENT_PORT || 47600}`;
+const BASE = `http://127.0.0.1:${process.env.HITNRUN_PORT || 47600}`;
 
 async function call(method, path, body) {
   const res = await fetch(BASE + path, {

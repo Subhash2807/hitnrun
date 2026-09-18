@@ -2,7 +2,7 @@
 'use strict';
 
 /**
- * MCP server for API Client.
+ * MCP server for hitnrun.
  *
  * Lets an AI assistant (Claude Code, Claude Desktop, any MCP client) operate the
  * app. It speaks MCP over stdio and forwards each call to the app's loopback
@@ -14,18 +14,18 @@
  * Promoting AI work into the user's workspace is done by the user, in the app.
  *
  * Config:
- *   API_CLIENT_PORT   control server port  (default 47600)
- *   API_CLIENT_TOKEN  control token, if set in the app's Settings
- *   API_CLIENT_LABEL  a name for this session, shown in the app
+ *   HITNRUN_PORT   control server port  (default 47600)
+ *   HITNRUN_TOKEN  control token, if set in the app's Settings
+ *   HITNRUN_LABEL  a name for this session, shown in the app
  */
 
 const { McpServer } = require('@modelcontextprotocol/sdk/server/mcp.js');
 const { StdioServerTransport } = require('@modelcontextprotocol/sdk/server/stdio.js');
 const { z } = require('zod');
 
-const PORT = process.env.API_CLIENT_PORT || 47600;
-const TOKEN = process.env.API_CLIENT_TOKEN || '';
-const LABEL = process.env.API_CLIENT_LABEL || '';
+const PORT = process.env.HITNRUN_PORT || 47600;
+const TOKEN = process.env.HITNRUN_TOKEN || '';
+const LABEL = process.env.HITNRUN_LABEL || '';
 const BASE = `http://127.0.0.1:${PORT}`;
 
 /** Session handle, established lazily on first use. */
@@ -44,7 +44,7 @@ async function callApp(method, path, body) {
     });
   } catch (err) {
     throw new Error(
-      `Could not reach API Client at ${BASE}. Ask the user to start the app, and check ` +
+      `Could not reach hitnrun at ${BASE}. Ask the user to start the app, and check ` +
         `Settings → Agent control server is enabled on port ${PORT}. (${err.message})`
     );
   }
@@ -60,8 +60,8 @@ async function callApp(method, path, body) {
   if (!res.ok) {
     if (res.status === 401) {
       throw new Error(
-        'API Client rejected the call (401). A control token is set in the app; put the same value ' +
-          'in this server\'s API_CLIENT_TOKEN environment variable.'
+        'hitnrun rejected the call (401). A control token is set in the app; put the same value ' +
+          'in this server\'s HITNRUN_TOKEN environment variable.'
       );
     }
     // A blocked send is a policy decision, not a failure — surface it plainly.
@@ -71,7 +71,7 @@ async function callApp(method, path, body) {
           `This is deliberate. Do not try to work around it — tell the user what you wanted to do and let them decide.`
       );
     }
-    throw new Error(`API Client returned ${res.status}: ${parsed?.error || text || res.statusText}`);
+    throw new Error(`hitnrun returned ${res.status}: ${parsed?.error || text || res.statusText}`);
   }
   return parsed;
 }
@@ -98,7 +98,7 @@ const guard = (fn) => async (args) => {
   }
 };
 
-const server = new McpServer({ name: 'api-client', version: '1.2.0' });
+const server = new McpServer({ name: 'hitnrun', version: '1.3.0' });
 
 /* ================================================================ status */
 
@@ -107,7 +107,7 @@ server.registerTool(
   {
     title: 'Check the app and your sandbox',
     description:
-      'Verify API Client is running, start your AI session workspace, and report the guardrails in effect. Call this first — it tells you what you are and are not allowed to do.',
+      'Verify hitnrun is running, start your AI session workspace, and report the guardrails in effect. Call this first — it tells you what you are and are not allowed to do.',
     inputSchema: {},
   },
   guard(async () => {
@@ -357,10 +357,10 @@ async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
   // stdout carries the protocol — human-readable output must go to stderr.
-  console.error(`[api-client-mcp] ready, talking to ${BASE}`);
+  console.error(`[hitnrun-mcp] ready, talking to ${BASE}`);
 }
 
 main().catch((err) => {
-  console.error('[api-client-mcp] fatal:', err);
+  console.error('[hitnrun-mcp] fatal:', err);
   process.exit(1);
 });

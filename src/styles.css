@@ -12,9 +12,13 @@
   --text: #e4e4e4;
   --text-dim: #9b9b9b;
   --text-faint: #6d6d6d;
-  --accent: #ff6c37;
-  --accent-hover: #ff855a;
-  --accent-dim: rgba(255, 108, 55, 0.14);
+  /* Sky blue. Two shades on purpose: --accent is bright enough to read as text
+     and borders on the dark background, but white text on it would fail
+     contrast, so filled controls use the darker --accent-solid instead. */
+  --accent: #38bdf8;
+  --accent-solid: #0284c7;
+  --accent-solid-hover: #0ea5e9;
+  --accent-dim: rgba(56, 189, 248, 0.14);
 
   --ok: #2fa84f;
   --warn: #e6a020;
@@ -41,7 +45,11 @@
   --text: #212121;
   --text-dim: #6b6b6b;
   --text-faint: #9a9a9a;
-  --accent-dim: rgba(255, 108, 55, 0.1);
+  /* On white, the bright shade is too pale to read — darken the accent itself. */
+  --accent: #0284c7;
+  --accent-solid: #0284c7;
+  --accent-solid-hover: #0369a1;
+  --accent-dim: rgba(2, 132, 199, 0.1);
 }
 
 * {
@@ -139,7 +147,7 @@ select {
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--accent-solid);
   display: grid;
   place-items: center;
   color: #fff;
@@ -554,16 +562,16 @@ select {
 }
 
 .btn-primary {
-  background: var(--accent);
-  border-color: var(--accent);
+  background: var(--accent-solid);
+  border-color: var(--accent-solid);
   color: #fff;
   font-weight: 600;
   min-width: 78px;
 }
 
 .btn-primary:hover:not(:disabled) {
-  background: var(--accent-hover);
-  border-color: var(--accent-hover);
+  background: var(--accent-solid-hover);
+  border-color: var(--accent-solid-hover);
 }
 
 .btn-sm {
@@ -1466,7 +1474,7 @@ input[type='checkbox'] {
   width: 20px;
   height: 20px;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--accent-solid);
   color: #fff;
   font-size: 11px;
   font-weight: 700;

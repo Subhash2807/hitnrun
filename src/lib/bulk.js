@@ -1,7 +1,7 @@
 /**
  * Row <-> bulk-text conversion for the key/value grids.
  *
- * Text format (same convention Postman uses):
+ * Text format:
  *   Content-Type:application/json      an enabled row
  *   //X-Debug:1                        a disabled row
  *   Authorization:                     an enabled row with an empty value

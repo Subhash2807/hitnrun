@@ -37,12 +37,12 @@ const section = (t) => console.log(`\n${t}`);
 
 function tempPair() {
   const stamp = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  const user = new Workspace(path.join(os.tmpdir(), `ac-user-${stamp}.json`));
+  const user = new Workspace(path.join(os.tmpdir(), `hitnrun-user-${stamp}.json`));
   user.load();
   user.saveNow = () => {};
   user.scheduleSave = () => {};
 
-  const ai = new AiWorkspace(path.join(os.tmpdir(), `ac-ai-${stamp}.json`), () => user.getState());
+  const ai = new AiWorkspace(path.join(os.tmpdir(), `hitnrun-ai-${stamp}.json`), () => user.getState());
   ai.load();
   ai.store.saveNow = () => {};
   ai.store.scheduleSave = () => {};

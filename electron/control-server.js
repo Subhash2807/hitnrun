@@ -90,7 +90,7 @@ class ControlServer {
       const token = this.workspace.getState().settings?.controlServer?.token;
       if (token) {
         const provided =
-          (req.headers.authorization || '').replace(/^Bearer\s+/i, '') || req.headers['x-api-client-token'];
+          (req.headers.authorization || '').replace(/^Bearer\s+/i, '') || req.headers['x-hitnrun-token'];
         if (provided !== token) return send(401, { error: 'Invalid or missing control token' });
       }
 
@@ -112,7 +112,7 @@ class ControlServer {
     if (!root) {
       return {
         body: {
-          name: 'API Client control server',
+          name: 'hitnrun control server',
           version: 1,
           docs: 'Every endpoint takes and returns JSON. Bodies accept either a full request model or { "curl": "..." }.',
           endpoints: {

@@ -1,6 +1,6 @@
 /**
  * Keeps the URL bar and the Params / Path Variables grids in sync, the way
- * Postman does: typing `?a=1` in the URL fills the grid, and editing the grid
+ * users expect: typing `?a=1` in the URL fills the grid, and editing the grid
  * rewrites the URL.
  */
 

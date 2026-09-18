@@ -91,7 +91,7 @@ function startEchoServer() {
 }
 
 function tempWorkspace() {
-  const file = path.join(os.tmpdir(), `apiclient-test-${Date.now()}-${Math.random().toString(36).slice(2)}.json`);
+  const file = path.join(os.tmpdir(), `hitnrun-test-${Date.now()}-${Math.random().toString(36).slice(2)}.json`);
   const ws = new Workspace(file);
   ws.load();
   ws.saveNow = () => {}; // don't touch disk during tests

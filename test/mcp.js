@@ -10,12 +10,12 @@
 const { spawn } = require('node:child_process');
 const path = require('node:path');
 
-const PORT = process.env.API_CLIENT_PORT || 47600;
+const PORT = process.env.HITNRUN_PORT || 47600;
 
 function startServer() {
   const child = spawn(process.execPath, [path.join(__dirname, '..', 'mcp', 'server.js')], {
     stdio: ['pipe', 'pipe', 'pipe'],
-    env: { ...process.env, API_CLIENT_PORT: String(PORT), API_CLIENT_LABEL: 'smoke-test' },
+    env: { ...process.env, HITNRUN_PORT: String(PORT), HITNRUN_LABEL: 'smoke-test' },
   });
 
   let buffer = '';
@@ -44,7 +44,7 @@ function startServer() {
 
   child.stderr.on('data', (d) => {
     const text = d.toString().trim();
-    if (text && !text.includes('[api-client-mcp] ready')) console.error('   stderr:', text);
+    if (text && !text.includes('[hitnrun-mcp] ready')) console.error('   stderr:', text);
   });
 
   let nextId = 1;
@@ -96,7 +96,7 @@ const assert = require('node:assert');
       clientInfo: { name: 'test-harness', version: '1.0.0' },
     });
     assert.ok(res.result, JSON.stringify(res.error));
-    assert.equal(res.result.serverInfo.name, 'api-client');
+    assert.equal(res.result.serverInfo.name, 'hitnrun');
     notify('notifications/initialized');
   });
 

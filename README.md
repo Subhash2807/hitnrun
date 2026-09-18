@@ -1,4 +1,4 @@
-# API Client
+# hitnrun
 
 A local, personal HTTP API testing desktop app. Runs on Windows and macOS.
 
@@ -13,15 +13,15 @@ no team features, no telemetry.
 npm install
 npm run dev      # hot-reloading development window
 npm start        # build once, then run the app
-npm test         # 47 headless tests of the engine, parser and agent API
+npm test         # 97 headless tests of the engine, parser, sandbox and agent API
 ```
 
 ### Building installers
 
 ```bash
-npm run dist:win     # -> release/API Client Setup 1.2.0.exe
-npm run dist:mac     # -> release/API Client-1.2.0.dmg   (must be run on a Mac)
-npm run dist:linux   # -> release/API Client-1.2.0.AppImage
+npm run dist:win     # -> release/hitnrun Setup 1.3.0.exe
+npm run dist:mac     # -> release/hitnrun-1.3.0.dmg   (must be run on a Mac)
+npm run dist:linux   # -> release/hitnrun-1.3.0.AppImage
 ```
 
 macOS builds have to be produced on macOS — Apple's toolchain cannot be run from
@@ -40,7 +40,7 @@ Nothing is packaged or signed, so nothing fights Gatekeeper. Install
 [Node](https://nodejs.org) (20 or newer), then:
 
 ```bash
-git clone <your-repo> api-client && cd api-client
+git clone <your-repo> hitnrun && cd hitnrun
 npm install
 npm start
 ```
@@ -48,7 +48,7 @@ npm start
 `npm start` builds and launches. For day-to-day use, make an alias:
 
 ```bash
-alias apiclient='cd ~/api-client && npm start'
+alias hitnrun='cd ~/hitnrun && npm start'
 ```
 
 ### Building a real .dmg
@@ -68,10 +68,10 @@ first time. Two fallbacks, in order:
 
 ```bash
 # 1. Strip the quarantine flag the download added
-xattr -dr com.apple.quarantine "/Applications/API Client.app"
+xattr -dr com.apple.quarantine "/Applications/hitnrun.app"
 
 # 2. Apple Silicon only, if it still refuses to launch: ad-hoc sign it
-codesign --force --deep --sign - "/Applications/API Client.app"
+codesign --force --deep --sign - "/Applications/hitnrun.app"
 ```
 
 You can also right-click the app → **Open** → **Open** to approve it once.
@@ -203,21 +203,21 @@ followed manually so each hop is recorded.
 
 The assistant talks to the app over **127.0.0.1**, so both must run on the
 **same machine**. There is no remote mode — this is deliberate, and it is why
-nothing off-machine can drive your API client.
+nothing off-machine can drive your requests.
 
 On whichever machine you are using:
 
-1. Install and start API Client.
+1. Install and start hitnrun.
 2. Install Claude Code there.
 3. Open **Sidebar → AI → Set up AI access** and copy the command it shows.
    The path is generated for *that* machine, so it is always correct.
 
 ```bash
-claude mcp add api-client --scope user --env API_CLIENT_PORT=47600 \
+claude mcp add hitnrun --scope user --env HITNRUN_PORT=47600 \
   -- node "<path>/mcp/server.js"
 ```
 
-Then ask: *"Check API Client is running, then build me a request for
+Then ask: *"Check hitnrun is running, then build me a request for
 https://httpbin.org/get and send it."*
 
 Claude Desktop takes the equivalent JSON, shown on the same screen.
@@ -230,7 +230,7 @@ PowerShell-safe variant behind a disclosure — or just use Git Bash / cmd.
 setup screen wires the MCP server to run through the app's own binary via
 `ELECTRON_RUN_AS_NODE`. Running from source uses the Node on your PATH instead.
 
-To remove it again: `claude mcp remove api-client --scope user`.
+To remove it again: `claude mcp remove hitnrun --scope user`.
 
 ### The AI works in its own workspace
 
@@ -398,8 +398,8 @@ is off, and a strict CSP blocks any external resource load.
 
 Your data lives in one file:
 
-- Windows — `%APPDATA%\API Client\workspace.json`
-- macOS — `~/Library/Application Support/API Client/workspace.json`
+- Windows — `%APPDATA%\hitnrun\workspace.json`
+- macOS — `~/Library/Application Support/hitnrun/workspace.json`
 
 Back it up by copying that file.
 

@@ -85,8 +85,8 @@ function TopBar() {
   return (
     <div className="topbar">
       <div className="brand" style={{ paddingLeft: isMac ? 64 : 0 }}>
-        <span className="brand-mark">A</span>
-        API Client
+        <span className="brand-mark">H</span>
+        hitnrun
       </div>
 
       <div className="topbar-spacer" />

@@ -501,7 +501,7 @@ function AiSetupModal() {
               <div>
                 Ask it something, for example:
                 <br />
-                <em className="dim">"Check API Client is running, then create a request for https://httpbin.org/get and send it."</em>
+                <em className="dim">"Check hitnrun is running, then create a request for https://httpbin.org/get and send it."</em>
               </div>
             </div>
 

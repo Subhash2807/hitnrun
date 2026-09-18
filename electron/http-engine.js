@@ -190,7 +190,7 @@ function sendRequest(spec, { onProgress } = {}) {
     if (bodyBuf && !hasHeader(headers, 'content-length')) {
       headers.push(['Content-Length', String(bodyBuf.length)]);
     }
-    if (!hasHeader(headers, 'user-agent')) headers.push(['User-Agent', 'APIClient/1.0.0']);
+    if (!hasHeader(headers, 'user-agent')) headers.push(['User-Agent', 'hitnrun/1.3.0']);
     if (!hasHeader(headers, 'accept')) headers.push(['Accept', '*/*']);
     if (!hasHeader(headers, 'accept-encoding')) headers.push(['Accept-Encoding', 'gzip, deflate, br']);
 
