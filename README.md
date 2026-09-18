@@ -19,13 +19,74 @@ npm test         # 47 headless tests of the engine, parser and agent API
 ### Building installers
 
 ```bash
-npm run dist:win     # -> release/API Client Setup 1.0.0.exe
-npm run dist:mac     # -> release/API Client-1.0.0.dmg   (must be run on a Mac)
-npm run dist:linux   # -> release/API Client-1.0.0.AppImage
+npm run dist:win     # -> release/API Client Setup 1.2.0.exe
+npm run dist:mac     # -> release/API Client-1.2.0.dmg   (must be run on a Mac)
+npm run dist:linux   # -> release/API Client-1.2.0.AppImage
 ```
 
 macOS builds have to be produced on macOS — Apple's toolchain cannot be run from
-Windows. The code itself is platform-independent; only the packaging step is.
+Windows. The code itself is platform-independent; only packaging is.
+
+On Windows, `dist:win` needs **Developer Mode** enabled
+(Settings → System → For developers), otherwise electron-builder cannot extract
+its code-signing toolchain — it contains symlinks that a normal account may not
+create.
+
+## Running it on a Mac
+
+### The simple way — from source
+
+Nothing is packaged or signed, so nothing fights Gatekeeper. Install
+[Node](https://nodejs.org) (20 or newer), then:
+
+```bash
+git clone <your-repo> api-client && cd api-client
+npm install
+npm start
+```
+
+`npm start` builds and launches. For day-to-day use, make an alias:
+
+```bash
+alias apiclient='cd ~/api-client && npm start'
+```
+
+### Building a real .dmg
+
+On the Mac, in the same checkout:
+
+```bash
+npm run dist:mac
+```
+
+Output lands in `release/`. Pick the arch that matches the machine — `arm64`
+for Apple Silicon (M1–M4), `x64` for Intel.
+
+The build is **unsigned**, because signing needs a paid Apple Developer
+certificate. That is fine for your own machines, but macOS will object the
+first time. Two fallbacks, in order:
+
+```bash
+# 1. Strip the quarantine flag the download added
+xattr -dr com.apple.quarantine "/Applications/API Client.app"
+
+# 2. Apple Silicon only, if it still refuses to launch: ad-hoc sign it
+codesign --force --deep --sign - "/Applications/API Client.app"
+```
+
+You can also right-click the app → **Open** → **Open** to approve it once.
+
+> Not verified by the author: everything above was developed and tested on
+> Windows. The code has no platform-specific logic beyond the title bar and
+> quit behaviour, but the macOS packaging and Gatekeeper steps have not been
+> run. Expect to iterate on the signing fallbacks.
+
+### Connecting an AI on the Mac
+
+Exactly the same as anywhere else — the app and Claude Code must both be on
+that Mac. Open **Sidebar → AI → Set up AI access**; the command is generated
+with that machine's paths, including the `.app` bundle path if you installed
+the dmg. Use the bash command, not the PowerShell one.
 
 ---
 

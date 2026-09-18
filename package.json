@@ -77,12 +77,15 @@
         {
           "target": "dmg",
           "arch": [
-            "x64",
-            "arm64"
+            "arm64",
+            "x64"
           ]
         }
       ],
-      "category": "public.app-category.developer-tools"
+      "category": "public.app-category.developer-tools",
+      "identity": null,
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false
     },
     "linux": {
       "target": [
