@@ -174,6 +174,13 @@ class Workspace extends EventEmitter {
     return collection;
   }
 
+  /** Add a fully built collection (from an import). */
+  importCollection(collection) {
+    this.state.collections.push(collection);
+    this.touch('collection:import', collection.id);
+    return collection;
+  }
+
   updateCollection(id, patch) {
     const collection = this.state.collections.find((c) => c.id === id);
     if (!collection) return null;

@@ -176,6 +176,32 @@ const assert = require('node:assert');
     assert.equal(payload.status, 200);
   });
 
+  await test('can record, read and annotate a test doc', async () => {
+    const call = async (name, args = {}) => {
+      const res = await send('tools/call', { name, arguments: args });
+      assert.ok(!res.result.isError, res.result.content?.[0]?.text);
+      return JSON.parse(res.result.content[0].text);
+    };
+    const rec = await call('start_recording', { name: 'MCP doc test', mode: 'manual' });
+    try {
+      await call('send_adhoc', { curl: 'curl https://httpbin.org/get?skipped=1' });
+      const sent = await call('send_adhoc', { curl: 'curl https://httpbin.org/get?kept=1', record: true });
+      assert.equal(sent.doc.recorded, true);
+
+      const doc = await call('get_doc', { doc_id: rec.docId });
+      assert.equal(doc.steps.length, 1, 'manual mode only keeps the send marked record');
+      assert.equal(doc.steps[0].request.url, 'https://httpbin.org/get?kept=1');
+      assert.equal(doc.steps[0].source, 'ai');
+
+      const step = await call('update_doc_step', { doc_id: rec.docId, step_id: doc.steps[0].id, title: 'Fetch', status: 'pass' });
+      assert.equal(step.status, 'pass');
+      const list = await call('list_docs');
+      assert.equal(list.recording.docId, rec.docId);
+    } finally {
+      await call('stop_recording');
+    }
+  });
+
   child.kill();
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

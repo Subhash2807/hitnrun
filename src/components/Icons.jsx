@@ -120,3 +120,50 @@ export const IconWrap = make(
     <line x1="3" y1="18" x2="10" y2="18" />
   </>
 );
+export const IconRecord = make(<circle cx="12" cy="12" r="6" fill="currentColor" stroke="none" />);
+export const IconStop = make(<rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none" />);
+export const IconPause = make(
+  <>
+    <line x1="9" y1="6" x2="9" y2="18" />
+    <line x1="15" y1="6" x2="15" y2="18" />
+  </>
+);
+export const IconPlay = make(<polygon points="7 5 19 12 7 19 7 5" fill="currentColor" />);
+export const IconDoc = make(
+  <>
+    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+    <polyline points="14 2 14 8 20 8" />
+    <line x1="8" y1="13" x2="16" y2="13" />
+    <line x1="8" y1="17" x2="13" y2="17" />
+  </>
+);
+export const IconCode = make(
+  <>
+    <polyline points="16 18 22 12 16 6" />
+    <polyline points="8 6 2 12 8 18" />
+  </>
+);
+export const IconInfo = make(
+  <>
+    <circle cx="12" cy="12" r="10" />
+    <line x1="12" y1="16" x2="12" y2="12" />
+    <line x1="12" y1="8" x2="12.01" y2="8" />
+  </>
+);
+export const IconGrip = make(
+  <>
+    <circle cx="9" cy="6" r="1" fill="currentColor" />
+    <circle cx="15" cy="6" r="1" fill="currentColor" />
+    <circle cx="9" cy="12" r="1" fill="currentColor" />
+    <circle cx="15" cy="12" r="1" fill="currentColor" />
+    <circle cx="9" cy="18" r="1" fill="currentColor" />
+    <circle cx="15" cy="18" r="1" fill="currentColor" />
+  </>
+);
+export const IconUpload = make(
+  <>
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+    <polyline points="17 8 12 3 7 8" />
+    <line x1="12" y1="3" x2="12" y2="15" />
+  </>
+);

@@ -306,9 +306,12 @@ function sendRequest(spec, { onProgress } = {}) {
       };
 
       req.on('socket', (socket) => {
-        socket.on('lookup', () => (timings.dns = Date.now()));
-        socket.on('connect', () => (timings.connect = Date.now()));
-        socket.on('secureConnect', () => (timings.tls = Date.now()));
+        // A kept-alive socket is already connected: there is nothing to time,
+        // and adding listeners to it on every request would leak them.
+        if (!socket.connecting) return;
+        socket.once('lookup', () => (timings.dns = Date.now()));
+        socket.once('connect', () => (timings.connect = Date.now()));
+        socket.once('secureConnect', () => (timings.tls = Date.now()));
       });
 
       if (timeout > 0) {

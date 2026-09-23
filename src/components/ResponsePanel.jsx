@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import Editor from './Editor.jsx';
 import { IconCopy, IconDownload } from './Icons.jsx';
 import { api, useStore } from '../store.js';
+import { AddToDocButton } from './DocsPanel.jsx';
 import {
   prettyBytes,
   prettyTime,
@@ -13,7 +14,7 @@ import {
   headerValue,
 } from '../lib/format.js';
 
-export default function ResponsePanel({ result, sending, theme }) {
+export default function ResponsePanel({ requestId, result, sending, theme }) {
   const [tab, setTab] = useState('body');
   const [bodyView, setBodyView] = useState('pretty');
   const [wrap, setWrap] = useState(true);
@@ -71,7 +72,11 @@ export default function ResponsePanel({ result, sending, theme }) {
     return (
       <div className="pane">
         <div className="error-box">
-          <strong>{result.phase === 'pre-request' ? 'Pre-request script failed' : 'Could not send request'}</strong>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <strong className="grow">{result.phase === 'pre-request' ? 'Pre-request script failed' : 'Could not send request'}</strong>
+            {/* A failure can be worth documenting too. */}
+            {result.phase !== 'pre-request' && <AddToDocButton requestId={requestId} />}
+          </div>
           <div style={{ marginTop: 6 }}>{failure.message}</div>
           {failure.code && (
             <div style={{ marginTop: 6 }} className="dim">
@@ -112,6 +117,7 @@ export default function ResponsePanel({ result, sending, theme }) {
         <span className="stat">
           Size <b>{prettyBytes(response.size?.decoded)}</b>
         </span>
+        <AddToDocButton requestId={requestId} />
         <button className="icon-btn" title="Copy response body" onClick={copyBody}>
           <IconCopy />
         </button>

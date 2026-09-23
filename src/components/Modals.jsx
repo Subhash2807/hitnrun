@@ -22,6 +22,9 @@ export default function Modals() {
       {modal.type === 'settings' && <SettingsModal />}
       {modal.type === 'promote' && <PromoteModal modal={modal} />}
       {modal.type === 'aiSetup' && <AiSetupModal />}
+      {modal.type === 'startRecording' && <StartRecordingModal docId={modal.docId} />}
+      {modal.type === 'renameDoc' && <RenameDoc id={modal.id} initial={modal.name} />}
+      {modal.type === 'exportDoc' && <ExportDocModal id={modal.id} format={modal.format} />}
     </Shell>
   );
 }
@@ -453,6 +456,144 @@ function RenameRequest({ id, initial }) {
   };
 
   return <SimpleRename title="Rename request" value={value} setValue={setValue} submit={submit} close={closeModal} />;
+}
+
+/* ------------------------------------------------------------- test docs */
+
+const MODE_TEXT = {
+  auto: 'Every request you send is added as a step. Delete the ones you don’t need when you review.',
+  manual: 'Nothing is added until you press “+ Add to doc” on a response.',
+};
+
+function StartRecordingModal({ docId }) {
+  const docs = useStore((s) => s.docs);
+  const startRecording = useStore((s) => s.startRecording);
+  const closeModal = useStore((s) => s.closeModal);
+  const resuming = docs.find((d) => d.id === docId);
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [mode, setMode] = useState('auto');
+
+  const submit = async () => {
+    await startRecording({ name: name.trim(), description, mode, docId: resuming?.id });
+    closeModal();
+  };
+
+  return (
+    <div className="modal" style={{ maxWidth: 480 }}>
+      <Head title={resuming ? `Resume recording “${resuming.name}”` : 'Start documenting'} />
+      <div className="modal-body" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {!resuming && (
+          <>
+            <label className="field-label">
+              Feature or test name
+              <input
+                className="text-input"
+                autoFocus
+                placeholder="e.g. Login flow – OTP"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && submit()}
+              />
+            </label>
+            <label className="field-label">
+              <span>
+                Summary <span style={{ color: 'var(--text-faint)' }}>(optional — you can write it later)</span>
+              </span>
+              <textarea
+                className="text-input"
+                rows={2}
+                placeholder="What is being tested, and why"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+              />
+            </label>
+          </>
+        )}
+        <div className="field-label">
+          Recording mode
+          <div className="mode-choice">
+            {['auto', 'manual'].map((m) => (
+              <button key={m} className={`mode-option ${mode === m ? 'active' : ''}`} onClick={() => setMode(m)}>
+                <b>{m === 'auto' ? 'Auto' : 'Manual'}</b>
+                <span>{MODE_TEXT[m]}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+      <div className="modal-foot">
+        <button className="btn" onClick={closeModal}>Cancel</button>
+        <button className="btn btn-primary" onClick={submit}>
+          <span className="rec-dot" /> {resuming ? 'Resume' : 'Start recording'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function RenameDoc({ id, initial }) {
+  const closeModal = useStore((s) => s.closeModal);
+  const [value, setValue] = useState(initial);
+  const submit = async () => {
+    if (value.trim()) await api.docs('update', id, { name: value.trim() });
+    closeModal();
+  };
+  return <SimpleRename title="Rename doc" value={value} setValue={setValue} submit={submit} close={closeModal} />;
+}
+
+export const DOC_FORMATS = [
+  { id: 'markdown', label: 'Markdown (.md)', hint: 'For GitHub, Jira, Confluence — sections stay collapsed' },
+  { id: 'html', label: 'HTML page (.html)', hint: 'One file that opens in any browser, collapsible sections' },
+  { id: 'pdf', label: 'PDF (.pdf)', hint: 'Printable, everything expanded' },
+  { id: 'postman', label: 'Postman collection (.json)', hint: 'Re-run the steps in order, in hitnrun or Postman' },
+];
+
+function ExportDocModal({ id, format: initialFormat }) {
+  const exportDoc = useStore((s) => s.exportDoc);
+  const closeModal = useStore((s) => s.closeModal);
+  const doc = useStore((s) => s.docs.find((d) => d.id === id));
+  const [format, setFormat] = useState(initialFormat || 'markdown');
+  const [mask, setMask] = useState(true);
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    setBusy(true);
+    const out = await exportDoc(id, format, mask);
+    setBusy(false);
+    if (!out?.canceled) closeModal();
+  };
+
+  return (
+    <div className="modal" style={{ maxWidth: 480 }}>
+      <Head title={`Download “${doc?.name ?? 'doc'}”`} />
+      <div className="modal-body" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div className="mode-choice">
+          {DOC_FORMATS.map((f) => (
+            <button key={f.id} className={`mode-option ${format === f.id ? 'active' : ''}`} onClick={() => setFormat(f.id)}>
+              <b>{f.label}</b>
+              <span>{f.hint}</span>
+            </button>
+          ))}
+        </div>
+        <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', cursor: 'pointer' }}>
+          <input type="checkbox" checked={mask} onChange={(e) => setMask(e.target.checked)} style={{ marginTop: 3 }} />
+          <span>
+            Mask secrets
+            <div className="dim" style={{ fontSize: 11.5 }}>
+              Hides Authorization, cookies, API keys, tokens and password fields (keeps the last 4 characters).
+            </div>
+          </span>
+        </label>
+      </div>
+      <div className="modal-foot">
+        <button className="btn" onClick={closeModal}>Cancel</button>
+        <button className="btn btn-primary" disabled={busy} onClick={submit}>
+          {busy ? <span className="spinner" /> : 'Download'}
+        </button>
+      </div>
+    </div>
+  );
 }
 
 function SimpleRename({ title, value, setValue, submit, close }) {

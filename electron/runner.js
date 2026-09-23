@@ -154,8 +154,13 @@ async function execute(
       name: request.name,
       method: spec.method,
       url: spec.url,
+      // The URL as it went out: query params and a query-string API key included.
+      fullUrl: fullUrl(spec),
       headers: spec.headers,
+      // What actually hit the wire, including auth and default headers.
+      sentHeaders: response.requestHeaders || spec.headers,
       bodyPreview: spec.body?.text ?? null,
+      body: describeBody(spec.body),
     },
     response,
     tests: post.tests,
@@ -183,4 +188,33 @@ async function execute(
   return result;
 }
 
-module.exports = { execute };
+function fullUrl(spec) {
+  try {
+    const u = new URL(spec.url);
+    for (const [k, v] of spec.query || []) if (k) u.searchParams.append(k, v ?? '');
+    const auth = spec.auth;
+    if (auth?.type === 'apikey' && auth.in === 'query' && auth.key) u.searchParams.append(auth.key, auth.value ?? '');
+    return u.href;
+  } catch {
+    return spec.url;
+  }
+}
+
+/** A text rendering of the body that was sent, for records and documentation. */
+function describeBody(body) {
+  if (!body || body.type === 'none') return null;
+  if (body.type === 'text') return { kind: 'text', contentType: body.contentType || null, text: body.text ?? '' };
+  if (body.type === 'urlencoded') {
+    return { kind: 'urlencoded', fields: body.fields.map((f) => [f.key, f.value]) };
+  }
+  if (body.type === 'form') {
+    return {
+      kind: 'form',
+      fields: body.fields.map((f) => [f.key, f.type === 'file' ? `@${f.src || 'file'}` : f.value]),
+    };
+  }
+  if (body.type === 'file') return { kind: 'file', src: body.src || '' };
+  return null;
+}
+
+module.exports = { execute, fullUrl };

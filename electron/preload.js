@@ -38,6 +38,19 @@ contextBridge.exposeInMainWorld('api', {
   aiSetupInfo: () => ipcRenderer.invoke('ai:setupInfo'),
   onAiChanged: (cb) => subscribe('ai:changed', cb),
 
+  /* test docs ------------------------------------------------------------- */
+  docsList: () => ipcRenderer.invoke('docs:list'),
+  docs: (method, ...args) => ipcRenderer.invoke('docs:call', method, args),
+  docsAddResult: (result, meta) => ipcRenderer.invoke('docs:addResult', result, meta),
+  docsExport: (docId, format, options) => ipcRenderer.invoke('docs:export', docId, format, options),
+  docsReveal: (filePath) => ipcRenderer.invoke('docs:reveal', filePath),
+  onDocsChanged: (cb) => subscribe('docs:changed', cb),
+
+  /* code panel / import --------------------------------------------------- */
+  codeLanguages: () => ipcRenderer.invoke('code:languages'),
+  generateCode: (request, options) => ipcRenderer.invoke('code:generate', request, options),
+  importPostman: () => ipcRenderer.invoke('collection:importPostman'),
+
   /* system --------------------------------------------------------------- */
   pickFile: (options) => ipcRenderer.invoke('dialog:pickFile', options),
   saveFile: (options) => ipcRenderer.invoke('dialog:saveFile', options),

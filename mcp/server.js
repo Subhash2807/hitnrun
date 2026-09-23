@@ -119,7 +119,10 @@ const guard = (fn) => async (args) => {
   }
 };
 
-const server = new McpServer({ name: 'hitnrun', version: '1.3.0' });
+const RECORD_HINT =
+  'Add this send to the test doc being recorded, even in manual mode. In auto mode every send is recorded anyway.';
+
+const server = new McpServer({ name: 'hitnrun', version: '1.5.0' });
 
 /* ================================================================ status */
 
@@ -142,7 +145,8 @@ server.registerTool(
       guardrails: policy,
       sandbox:
         'You work in your own AI workspace. You can read the user\'s requests and copy them, ' +
-        'but you cannot modify or delete anything the user owns. The user promotes your work themselves.',
+        'but you cannot modify or delete anything the user owns. The user promotes your work themselves. ' +
+        'Test docs are the exception: you may read and edit them (titles, notes, pass/fail, order) and drive the recording.',
     };
   })
 );
@@ -289,9 +293,12 @@ server.registerTool(
     title: 'Send a request from your workspace',
     description:
       'Run a request from your AI workspace and return status, timing, headers and the decoded body. Subject to the user\'s guardrails: blocked hosts and methods are refused, including across redirects.',
-    inputSchema: { request_id: z.string() },
+    inputSchema: {
+      request_id: z.string(),
+      record: z.boolean().optional().describe(RECORD_HINT),
+    },
   },
-  guard(({ request_id }) => callApp('POST', `/ai/requests/${request_id}/send`))
+  guard(({ request_id, record }) => callApp('POST', `/ai/requests/${request_id}/send`, record ? { record } : undefined))
 );
 
 server.registerTool(
@@ -300,9 +307,110 @@ server.registerTool(
     title: 'Send a one-off request',
     description:
       'Run a cURL command once without saving it. Same guardrails apply. Use this for a quick check rather than cluttering the workspace.',
-    inputSchema: { curl: z.string() },
+    inputSchema: { curl: z.string(), record: z.boolean().optional().describe(RECORD_HINT) },
   },
-  guard(({ curl }) => callApp('POST', '/ai/send', { curl }))
+  guard(({ curl, record }) => callApp('POST', '/ai/send', { curl, ...(record ? { record } : {}) }))
+);
+
+/* ========================================================== test docs */
+
+server.registerTool(
+  'list_docs',
+  {
+    title: 'List test docs',
+    description:
+      "List the user's test documentation: ordered records of the requests sent while testing a feature, with notes and pass/fail per step. Also reports the recording in progress, if any.",
+    inputSchema: {},
+  },
+  guard(() => callApp('GET', '/docs'))
+);
+
+server.registerTool(
+  'get_doc',
+  {
+    title: 'Read a test doc',
+    description:
+      'Read one test doc with every step: the full URL, headers and body sent, the response, the notes, expected result and pass/fail status. Bodies are cut at 8,000 characters unless full_bodies is set.',
+    inputSchema: {
+      doc_id: z.string(),
+      full_bodies: z.boolean().optional().describe('Return request and response bodies uncut'),
+    },
+  },
+  guard(({ doc_id, full_bodies }) => callApp('GET', `/docs/${doc_id}${full_bodies ? '?bodies=full' : ''}`))
+);
+
+server.registerTool(
+  'update_doc',
+  {
+    title: 'Rename a test doc or edit its summary',
+    description: 'Change the name or the summary/description shown at the top of a test doc.',
+    inputSchema: { doc_id: z.string(), name: z.string().optional(), description: z.string().optional() },
+  },
+  guard(({ doc_id, ...patch }) => callApp('PATCH', `/docs/${doc_id}`, patch))
+);
+
+server.registerTool(
+  'update_doc_step',
+  {
+    title: 'Edit a step in a test doc',
+    description:
+      'Write the documentation for one step: a clear title, a note explaining what it shows, the expected result, and whether it passed. Only the fields you pass change.',
+    inputSchema: {
+      doc_id: z.string(),
+      step_id: z.string(),
+      title: z.string().optional(),
+      note: z.string().optional(),
+      expected: z.string().optional(),
+      status: z.enum(['untested', 'pass', 'fail']).optional(),
+    },
+  },
+  guard(({ doc_id, step_id, ...patch }) => callApp('PATCH', `/docs/${doc_id}/steps/${step_id}`, patch))
+);
+
+server.registerTool(
+  'move_doc_step',
+  {
+    title: 'Reorder a step in a test doc',
+    description: 'Move a step to a new zero-based position in its doc.',
+    inputSchema: { doc_id: z.string(), step_id: z.string(), index: z.number().int().min(0) },
+  },
+  guard(({ doc_id, step_id, index }) => callApp('POST', `/docs/${doc_id}/steps/${step_id}/move`, { index }))
+);
+
+server.registerTool(
+  'delete_doc_step',
+  {
+    title: 'Remove a step from a test doc',
+    description:
+      'Remove one step, for example a duplicate or a failed attempt the user does not want documented. Whole docs can only be deleted by the user in the app.',
+    inputSchema: { doc_id: z.string(), step_id: z.string() },
+  },
+  guard(({ doc_id, step_id }) => callApp('DELETE', `/docs/${doc_id}/steps/${step_id}`))
+);
+
+server.registerTool(
+  'start_recording',
+  {
+    title: 'Start recording a test doc',
+    description:
+      'Start documenting a test run. In auto mode every request sent (by you or the user) is added as a step; in manual mode only sends made with record: true, or added by the user. Pass doc_id to continue an existing doc. Only one recording runs at a time; starting one stops the other.',
+    inputSchema: {
+      name: z.string().optional().describe('e.g. "Login flow – OTP"'),
+      mode: z.enum(['auto', 'manual']).optional(),
+      doc_id: z.string().optional().describe('Resume recording into this doc instead of starting a new one'),
+    },
+  },
+  guard(({ name, mode, doc_id }) => callApp('POST', '/docs/recording', { name, mode, docId: doc_id }))
+);
+
+server.registerTool(
+  'stop_recording',
+  {
+    title: 'Stop recording',
+    description: 'Stop the recording in progress. The doc is kept; the user reviews and downloads it in the app.',
+    inputSchema: {},
+  },
+  guard(() => callApp('DELETE', '/docs/recording'))
 );
 
 /* ============================================================= variables */
@@ -333,10 +441,10 @@ server.registerTool(
 server.registerTool(
   'show_in_app',
   {
-    title: 'Show a request to the user',
+    title: 'Show a request or test doc to the user',
     description:
-      'Open a request in the app window and bring it to the front, so the user can look at what you built. Use this when you want them to review something.',
-    inputSchema: { request_id: z.string() },
+      'Open a request or a test doc in the app window and bring it to the front, so the user can look at what you built. Use this when you want them to review something.',
+    inputSchema: { request_id: z.string().describe('A request id, or a doc id (doc_…)') },
   },
   guard(({ request_id }) => callApp('POST', '/ui/open', { requestId: request_id }))
 );

@@ -7,8 +7,9 @@ import Editor from './Editor.jsx';
 import ResponsePanel from './ResponsePanel.jsx';
 import Dropdown, { Item, Separator } from './Dropdown.jsx';
 import SyncIndicator from './SyncIndicator.jsx';
+import { SideRail, SidePanel } from './SidePanel.jsx';
 import {
-  IconMore, IconCopy, IconTerminal, IconChevronDown, IconSync, IconSplitRight, IconSplitBelow,
+  IconMore, IconCopy, IconTerminal, IconChevronDown, IconSync, IconSplitRight, IconSplitBelow, IconCode,
 } from './Icons.jsx';
 import { METHODS, METHOD_COLORS } from '../lib/format.js';
 import { composeUrl, decomposeUrl, syncPathVars } from '../lib/url.js';
@@ -30,6 +31,9 @@ export default function RequestView({ requestId, theme }) {
   const sideBySide = useStore((s) => s.state?.ui?.responseLayout === 'right');
   const splitKey = sideBySide ? 'splitPctRight' : 'splitPctBelow';
   const savedSplit = useStore((s) => s.state?.ui?.[splitKey]);
+  // The open side panel (code / info) stays open as you move between requests.
+  const sidePanel = useStore((s) => s.state?.ui?.sidePanel || null);
+  const setSidePanel = (panel) => patchUi({ sidePanel: panel });
 
   const [tab, setTab] = useState('params');
   const [splitPct, setSplitPct] = useState(savedSplit ?? (sideBySide ? 50 : 48));
@@ -146,187 +150,194 @@ export default function RequestView({ requestId, theme }) {
   const hasScripts = !!(request.scripts?.pre?.trim() || request.scripts?.test?.trim());
 
   return (
-    <div className="request-view">
-      <div className="request-head">
-        <div className="request-title">
-          <input
-            value={request.name}
-            onChange={(e) => patchRequest(requestId, { name: e.target.value })}
-            spellCheck={false}
-            title="Rename this request"
-          />
-          <span className="breadcrumb">saved automatically</span>
-          <div className="grow" />
-          <SyncIndicator requestId={requestId} />
-          <button
-            className="icon-btn"
-            title={sideBySide ? 'Show response below' : 'Show response on the right'}
-            onClick={() => patchUi({ responseLayout: sideBySide ? 'below' : 'right' })}
-          >
-            {sideBySide ? <IconSplitBelow /> : <IconSplitRight />}
-          </button>
-          <button className="icon-btn" title="Copy as cURL" onClick={copyAsCurl}>
-            <IconTerminal />
-          </button>
-          <Dropdown
-            align="right"
-            trigger={(open) => (
-              <button className="icon-btn" onClick={open} title="More actions">
-                <IconMore />
-              </button>
-            )}
-          >
-            <Item onClick={() => duplicateRequest(requestId)} icon={<IconCopy width={12} height={12} />}>
-              Duplicate
-            </Item>
-            <Item onClick={copyAsCurl} icon={<IconTerminal width={12} height={12} />}>
-              Copy as cURL
-            </Item>
-            <Item onClick={importFromClipboard}>Import cURL from clipboard</Item>
-            <Separator />
-            <Item onClick={() => syncRequest(requestId)} icon={<IconSync width={12} height={12} />}>
-              Sync with source cURL
-            </Item>
-            <Item
-              onClick={() =>
-                patchRequest(requestId, {
-                  settings: { ...request.settings, syncExempt: !request.settings?.syncExempt },
-                })
-              }
-            >
-              {request.settings?.syncExempt ? 'Include in source sync' : 'Exclude from source sync'}
-            </Item>
-            <Separator />
-            <Item
-              danger
-              onClick={() =>
-                openModal({
-                  type: 'confirm',
-                  title: 'Delete request',
-                  message: `Delete "${request.name}"?`,
-                  onConfirm: () => deleteRequest(requestId),
-                })
-              }
-            >
-              Delete
-            </Item>
-          </Dropdown>
-        </div>
-
-        <div className="urlbar">
-          <div className="url-group">
-            <MethodSelect value={request.method} onChange={(method) => patchRequest(requestId, { method })} />
+    <div className="request-shell">
+      <div className="request-view">
+        <div className="request-head">
+          <div className="request-title">
             <input
-              className="url-input"
-              value={urlValue}
+              value={request.name}
+              onChange={(e) => patchRequest(requestId, { name: e.target.value })}
               spellCheck={false}
-              placeholder="Enter URL or paste a cURL command"
-              onFocus={() => {
-                setUrlDraft(modelUrl);
-                setUrlFocused(true);
-              }}
-              onBlur={() => setUrlFocused(false)}
-              onChange={(e) => onUrlChange(e.target.value)}
-              onPaste={onUrlPaste}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.currentTarget.blur();
-                  send(requestId);
-                }
-              }}
+              title="Rename this request"
             />
+            <span className="breadcrumb">saved automatically</span>
+            <div className="grow" />
+            <SyncIndicator requestId={requestId} />
+            <button
+              className="icon-btn"
+              title={sideBySide ? 'Show response below' : 'Show response on the right'}
+              onClick={() => patchUi({ responseLayout: sideBySide ? 'below' : 'right' })}
+            >
+              {sideBySide ? <IconSplitBelow /> : <IconSplitRight />}
+            </button>
+            <button className="icon-btn" title="Copy as cURL" onClick={copyAsCurl}>
+              <IconTerminal />
+            </button>
+            <Dropdown
+              align="right"
+              trigger={(open) => (
+                <button className="icon-btn" onClick={open} title="More actions">
+                  <IconMore />
+                </button>
+              )}
+            >
+              <Item onClick={() => duplicateRequest(requestId)} icon={<IconCopy width={12} height={12} />}>
+                Duplicate
+              </Item>
+              <Item onClick={() => setSidePanel('code')} icon={<IconCode width={12} height={12} />}>
+                View code (cURL, fetch, Python)
+              </Item>
+              <Item onClick={copyAsCurl} icon={<IconTerminal width={12} height={12} />}>
+                Copy as cURL
+              </Item>
+              <Item onClick={importFromClipboard}>Import cURL from clipboard</Item>
+              <Separator />
+              <Item onClick={() => syncRequest(requestId)} icon={<IconSync width={12} height={12} />}>
+                Sync with source cURL
+              </Item>
+              <Item
+                onClick={() =>
+                  patchRequest(requestId, {
+                    settings: { ...request.settings, syncExempt: !request.settings?.syncExempt },
+                  })
+                }
+              >
+                {request.settings?.syncExempt ? 'Include in source sync' : 'Exclude from source sync'}
+              </Item>
+              <Separator />
+              <Item
+                danger
+                onClick={() =>
+                  openModal({
+                    type: 'confirm',
+                    title: 'Delete request',
+                    message: `Delete "${request.name}"?`,
+                    onConfirm: () => deleteRequest(requestId),
+                  })
+                }
+              >
+                Delete
+              </Item>
+            </Dropdown>
           </div>
-          <button className="btn btn-primary" disabled={sending} onClick={() => send(requestId)}>
-            {sending ? <span className="spinner" /> : 'Send'}
-          </button>
-        </div>
-      </div>
 
-      <div className={`split ${sideBySide ? 'split-row' : ''}`} ref={containerRef}>
-        <div className="pane" style={{ [sideBySide ? 'width' : 'height']: `${splitPct}%`, flex: 'none' }}>
-          <div className="panel-tabs">
-            <PanelTab id="params" tab={tab} setTab={setTab} count={counts.params}>Params</PanelTab>
-            <PanelTab id="auth" tab={tab} setTab={setTab} dot={hasAuth}>Authorization</PanelTab>
-            <PanelTab id="headers" tab={tab} setTab={setTab} count={counts.headers}>Headers</PanelTab>
-            <PanelTab id="body" tab={tab} setTab={setTab} dot={hasBody}>Body</PanelTab>
-            <PanelTab id="pre" tab={tab} setTab={setTab} dot={!!request.scripts?.pre?.trim()}>Pre-request</PanelTab>
-            <PanelTab id="tests" tab={tab} setTab={setTab} dot={!!request.scripts?.test?.trim()}>Tests</PanelTab>
-            <PanelTab id="settings" tab={tab} setTab={setTab}>Settings</PanelTab>
-          </div>
-
-          {tab === 'params' && (
-            <div className="kv-scroll" style={{ display: 'flex', flexDirection: 'column' }}>
-              <KeyValueEditor
-                auto
-                title="Query Params"
-                rows={request.params || []}
-                onChange={(params) => patchRequest(requestId, { params })}
-                emptyNote="Query params you add here appear in the URL above."
+          <div className="urlbar">
+            <div className="url-group">
+              <MethodSelect value={request.method} onChange={(method) => patchRequest(requestId, { method })} />
+              <input
+                className="url-input"
+                value={urlValue}
+                spellCheck={false}
+                placeholder="Enter URL or paste a cURL command"
+                onFocus={() => {
+                  setUrlDraft(modelUrl);
+                  setUrlFocused(true);
+                }}
+                onBlur={() => setUrlFocused(false)}
+                onChange={(e) => onUrlChange(e.target.value)}
+                onPaste={onUrlPaste}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.currentTarget.blur();
+                    send(requestId);
+                  }
+                }}
               />
-              <div style={{ borderTop: '1px solid var(--border)' }}>
+            </div>
+            <button className="btn btn-primary" disabled={sending} onClick={() => send(requestId)}>
+              {sending ? <span className="spinner" /> : 'Send'}
+            </button>
+          </div>
+        </div>
+
+        <div className={`split ${sideBySide ? 'split-row' : ''}`} ref={containerRef}>
+          <div className="pane" style={{ [sideBySide ? 'width' : 'height']: `${splitPct}%`, flex: 'none' }}>
+            <div className="panel-tabs">
+              <PanelTab id="params" tab={tab} setTab={setTab} count={counts.params}>Params</PanelTab>
+              <PanelTab id="auth" tab={tab} setTab={setTab} dot={hasAuth}>Authorization</PanelTab>
+              <PanelTab id="headers" tab={tab} setTab={setTab} count={counts.headers}>Headers</PanelTab>
+              <PanelTab id="body" tab={tab} setTab={setTab} dot={hasBody}>Body</PanelTab>
+              <PanelTab id="pre" tab={tab} setTab={setTab} dot={!!request.scripts?.pre?.trim()}>Pre-request</PanelTab>
+              <PanelTab id="tests" tab={tab} setTab={setTab} dot={!!request.scripts?.test?.trim()}>Tests</PanelTab>
+              <PanelTab id="settings" tab={tab} setTab={setTab}>Settings</PanelTab>
+            </div>
+
+            {tab === 'params' && (
+              <div className="kv-scroll" style={{ display: 'flex', flexDirection: 'column' }}>
                 <KeyValueEditor
                   auto
-                  title="Path Variables"
-                  rows={request.pathVars || []}
-                  onChange={(pathVars) => patchRequest(requestId, { pathVars })}
-                  toggles={false}
-                  keyPlaceholder="Variable"
-                  emptyNote={
-                    <>
-                      Write <code className="mono">:name</code> in the URL path — for example{' '}
-                      <code className="mono">/users/:id</code> — and it shows up here.
-                    </>
-                  }
+                  title="Query Params"
+                  rows={request.params || []}
+                  onChange={(params) => patchRequest(requestId, { params })}
+                  emptyNote="Query params you add here appear in the URL above."
                 />
+                <div style={{ borderTop: '1px solid var(--border)' }}>
+                  <KeyValueEditor
+                    auto
+                    title="Path Variables"
+                    rows={request.pathVars || []}
+                    onChange={(pathVars) => patchRequest(requestId, { pathVars })}
+                    toggles={false}
+                    keyPlaceholder="Variable"
+                    emptyNote={
+                      <>
+                        Write <code className="mono">:name</code> in the URL path — for example{' '}
+                        <code className="mono">/users/:id</code> — and it shows up here.
+                      </>
+                    }
+                  />
+                </div>
               </div>
-            </div>
-          )}
+            )}
 
-          {tab === 'auth' && (
-            <AuthEditor auth={request.auth} onChange={(auth) => patchRequest(requestId, { auth })} />
-          )}
+            {tab === 'auth' && (
+              <AuthEditor auth={request.auth} onChange={(auth) => patchRequest(requestId, { auth })} />
+            )}
 
-          {tab === 'headers' && (
-            <KeyValueEditor
-              title="Headers"
-              rows={request.headers || []}
-              onChange={(headers) => patchRequest(requestId, { headers })}
-              keyPlaceholder="Header"
-              emptyNote="Content-Type, Content-Length, Host and Accept-Encoding are added automatically when needed."
-            />
-          )}
+            {tab === 'headers' && (
+              <KeyValueEditor
+                title="Headers"
+                rows={request.headers || []}
+                onChange={(headers) => patchRequest(requestId, { headers })}
+                keyPlaceholder="Header"
+                emptyNote="Content-Type, Content-Length, Host and Accept-Encoding are added automatically when needed."
+              />
+            )}
 
-          {tab === 'body' && (
-            <BodyEditor body={request.body} onChange={(body) => patchRequest(requestId, { body })} theme={theme} />
-          )}
+            {tab === 'body' && (
+              <BodyEditor body={request.body} onChange={(body) => patchRequest(requestId, { body })} theme={theme} />
+            )}
 
-          {tab === 'pre' && (
-            <ScriptTab
-              value={request.scripts?.pre}
-              onChange={(pre) => patchRequest(requestId, { scripts: { ...request.scripts, pre } })}
-              theme={theme}
-              hint="Runs before the request is sent. Use pm.environment.set('token', …) to prepare variables."
-            />
-          )}
+            {tab === 'pre' && (
+              <ScriptTab
+                value={request.scripts?.pre}
+                onChange={(pre) => patchRequest(requestId, { scripts: { ...request.scripts, pre } })}
+                theme={theme}
+                hint="Runs before the request is sent. Use pm.environment.set('token', …) to prepare variables."
+              />
+            )}
 
-          {tab === 'tests' && (
-            <ScriptTab
-              value={request.scripts?.test}
-              onChange={(test) => patchRequest(requestId, { scripts: { ...request.scripts, test } })}
-              theme={theme}
-              hint="Runs after the response arrives. pm.test(), pm.expect() and pm.response are available."
-            />
-          )}
+            {tab === 'tests' && (
+              <ScriptTab
+                value={request.scripts?.test}
+                onChange={(test) => patchRequest(requestId, { scripts: { ...request.scripts, test } })}
+                theme={theme}
+                hint="Runs after the response arrives. pm.test(), pm.expect() and pm.response are available."
+              />
+            )}
 
-          {tab === 'settings' && <RequestSettings request={request} onChange={(settings) => patchRequest(requestId, { settings })} />}
-        </div>
+            {tab === 'settings' && <RequestSettings request={request} onChange={(settings) => patchRequest(requestId, { settings })} />}
+          </div>
 
-        <div className={`resizer ${sideBySide ? '' : 'resizer-h'}`} onMouseDown={startDrag} />
+          <div className={`resizer ${sideBySide ? '' : 'resizer-h'}`} onMouseDown={startDrag} />
 
-        <div className="pane" style={{ flex: 1 }}>
-          <ResponsePanel result={result} sending={sending} theme={theme} />
+          <div className="pane" style={{ flex: 1 }}>
+            <ResponsePanel requestId={requestId} result={result} sending={sending} theme={theme} />
+          </div>
         </div>
       </div>
+      {sidePanel && <SidePanel panel={sidePanel} request={request} theme={theme} onClose={() => setSidePanel(null)} />}
+      <SideRail active={sidePanel} onSelect={setSidePanel} />
     </div>
   );
 }

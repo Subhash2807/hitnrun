@@ -52,6 +52,13 @@ export const useStore = create((set, get) => ({
   // The AI's separate workspace — never merged into `state`.
   ai: { collections: [], sessions: [] },
   control: { running: false, port: null, error: null },
+  // Test docs: summaries for the sidebar, plus the recording in progress.
+  docs: [],
+  recording: null,
+  // Bumped per doc on every change so an open doc view knows to refetch.
+  docVersions: {},
+  // requestId -> true once the response on screen has been added to the doc.
+  addedToDoc: {},
   toast: null,
   modal: null,
 
@@ -66,6 +73,25 @@ export const useStore = create((set, get) => ({
     api.aiGetState().then((ai) => set({ ai }));
 
     api.onAiChanged((ai) => set({ ai }));
+
+    // A deleted doc can't stay open in a tab.
+    const closeStaleDocTabs = (docs) => {
+      const known = new Set(docs.map((d) => d.id));
+      const stale = (get().state?.ui?.tabs || []).filter((t) => t.startsWith('doc_') && !known.has(t));
+      stale.forEach((t) => get().closeTab(t, { skipFlush: true }));
+    };
+    api.docsList().then(({ docs, recording }) => {
+      set({ docs, recording });
+      closeStaleDocTabs(docs);
+    });
+    api.onDocsChanged(({ docs, recording, docId }) => {
+      set((s) => ({
+        docs,
+        recording,
+        docVersions: docId ? { ...s.docVersions, [docId]: (s.docVersions[docId] || 0) + 1 } : s.docVersions,
+      }));
+      closeStaleDocTabs(docs);
+    });
 
     api.onWorkspaceChanged(({ state: next, syncStates }) => {
       if (syncStates) set({ syncStates });
@@ -84,7 +110,9 @@ export const useStore = create((set, get) => ({
         get().openTab(event.requestId);
         get().showToast('Request created by agent');
       } else if (event.type === 'ui:open' && event.requestId) {
-        if (findRequest(get().state, event.requestId)) {
+        if (get().docs.some((d) => d.id === event.requestId)) {
+          get().openTab(event.requestId);
+        } else if (findRequest(get().state, event.requestId)) {
           get().openTab(event.requestId);
         } else {
           // The AI's own requests live in the AI tab, not in a request tab.
@@ -263,6 +291,8 @@ export const useStore = create((set, get) => ({
       set((s) => ({
         responses: { ...s.responses, [requestId]: result },
         sending: { ...s.sending, [requestId]: false },
+        // Auto mode already recorded it; otherwise the button starts fresh.
+        addedToDoc: { ...s.addedToDoc, [requestId]: !!result?.docStepId },
       }));
       return result;
     } catch (err) {
@@ -351,6 +381,67 @@ export const useStore = create((set, get) => ({
     if (result.exempt) bits.push(`${result.exempt} exempt`);
     get().showToast(bits.join(', '));
     return result;
+  },
+
+  /* -------------------------------------------------------------- test docs */
+
+  async docCall(method, ...args) {
+    return api.docs(method, ...args);
+  },
+
+  async startRecording({ name, mode, description, docId }) {
+    const rec = await api.docs('startRecording', { name, mode, description, docId });
+    if (rec) {
+      get().patchUi({ sidebarTab: 'docs' });
+      get().showToast(`Recording "${rec.name}" — ${rec.mode === 'auto' ? 'every send is added' : 'add responses with + Add to doc'}`);
+    }
+    return rec;
+  },
+
+  async stopRecording() {
+    const rec = get().recording;
+    await api.docs('stopRecording');
+    if (rec) get().showToast(`Stopped recording "${rec.name}" — ${rec.stepCount} step${rec.stepCount === 1 ? '' : 's'}`);
+  },
+
+  /** The "+ Add to doc" button on a response. */
+  async addResponseToDoc(requestId) {
+    const result = get().responses[requestId];
+    if (!result) return;
+    const out = await api.docsAddResult(result, { requestId });
+    if (!out.ok) return get().showToast(out.error);
+    set((s) => ({ addedToDoc: { ...s.addedToDoc, [requestId]: true } }));
+    get().showToast(`Added to "${out.docName}"`);
+  },
+
+  async deleteDoc(docId) {
+    await api.docs('remove', docId);
+    get().closeTab(docId, { skipFlush: true });
+  },
+
+  async exportDoc(docId, format, mask = true) {
+    const out = await api.docsExport(docId, format, { mask });
+    if (out.canceled) return out;
+    if (!out.ok) {
+      get().showToast(out.error || 'Could not save the doc');
+      return out;
+    }
+    get().showToast(`Saved ${out.path.split(/[\\/]/).pop()}`);
+    return out;
+  },
+
+  /** File → Import Postman Collection, and the sidebar's + menu. */
+  async importPostman() {
+    const out = await api.importPostman();
+    if (out.canceled) return out;
+    if (!out.ok) {
+      get().showToast(out.error || 'Could not import that file');
+      return out;
+    }
+    await get().refresh();
+    get().patchUi({ sidebarTab: 'collections' });
+    get().showToast(`Imported "${out.name}"`);
+    return out;
   },
 
   /* ------------------------------------------------------ collections etc. */

@@ -19,9 +19,11 @@ const { defaultRequest } = require('./workspace');
 const { parseSource, buildPatch, syncState, describeChanges } = require('./sync');
 
 class ControlServer {
-  constructor({ workspace, aiWorkspace, onEvent }) {
+  constructor({ workspace, aiWorkspace, docs = null, environmentName = null, onEvent }) {
     this.workspace = workspace;
     this.aiWorkspace = aiWorkspace;
+    this.docs = docs;
+    this.environmentName = environmentName || (() => null);
     this.onEvent = onEvent || (() => {});
     this.server = null;
     this.port = null;
@@ -39,6 +41,24 @@ class ControlServer {
    */
   _userWritesAllowed() {
     return this.workspace.getState().settings?.allowAgentUserWrites === true;
+  }
+
+  /**
+   * Offer a send made through this server to the test-doc recording. Lands when
+   * recording in auto mode, or when the caller asked for it with `record: true`.
+   * Returns a short note for the response, or null when nothing was recorded.
+   */
+  _record(result, { force = false, requestId = null } = {}) {
+    if (!this.docs || !result) return null;
+    const rec = this.docs.recording();
+    if (!rec) return force ? { recorded: false, reason: 'No recording is running. Start one with POST /docs/recording.' } : null;
+    const step = force
+      ? rec.paused
+        ? null
+        : this.docs.addStep(rec.docId, result, { source: 'ai', requestId, environment: this.environmentName() })
+      : this.docs.capture(result, { source: 'ai', requestId, environment: this.environmentName() });
+    if (step) return { recorded: true, docId: rec.docId, docName: rec.name, stepId: step.id };
+    return force ? { recorded: false, reason: 'The recording is paused.' } : null;
   }
 
   start(port = 47600) {
@@ -144,6 +164,16 @@ class ControlServer {
             'POST /requests/:id/sync': 'pull headers + host from the source cURL',
             'POST /collections/:id/sync': 'sync every request in a collection or folder',
             'POST /ui/open': '{ requestId } -> open it in a tab and focus the window',
+            'GET /docs': 'test docs (summaries) and the current recording',
+            'GET /docs/:id': 'one doc with every step (?bodies=full for untruncated bodies)',
+            'PATCH /docs/:id': '{ name?, description? }',
+            'PATCH /docs/:id/steps/:stepId': '{ title?, note?, expected?, status: untested|pass|fail }',
+            'DELETE /docs/:id/steps/:stepId': 'remove a step',
+            'POST /docs/:id/steps/:stepId/move': '{ index } -> move to a zero-based position',
+            'GET /docs/recording': 'the current recording, or null',
+            'POST /docs/recording': '{ name, mode: auto|manual, docId? } -> start (or resume docId)',
+            'PATCH /docs/recording': '{ mode?, paused? }',
+            'DELETE /docs/recording': 'stop recording',
           },
         },
       };
@@ -161,6 +191,12 @@ class ControlServer {
       this.onEvent({ type: 'ui:open', requestId: body?.requestId, focus: true });
       return { body: { opened: body?.requestId } };
     }
+
+    /* -------------------------------------------------------------- docs */
+    // Test docs live in their own store, and the user has chosen to let agents
+    // read and edit them, so they sit outside the user-workspace wall. Deleting
+    // a whole doc stays a UI-only action.
+    if (root === 'docs') return this._routeDocs(method, seg, url, body);
 
     // Everything below touches the USER workspace. Reads are always fine;
     // writes need the wall lowered explicitly.
@@ -268,7 +304,8 @@ class ControlServer {
         this.onEvent({ type: 'request:sending', requestId: id });
         const result = await execute(ws, hit.request, { collection: hit.collection });
         this.onEvent({ type: 'request:result', requestId: id, result });
-        return { body: presentResult(result) };
+        const doc = this._record(result, { force: body?.record === true, requestId: id });
+        return { body: withDoc(presentResult(result), doc) };
       }
     }
 
@@ -285,7 +322,8 @@ class ControlServer {
       const ephemeral = defaultRequest(fields);
       const result = await execute(ws, ephemeral, { collection: null, recordHistory: true });
       this.onEvent({ type: 'adhoc:result', result });
-      return { body: presentResult(result) };
+      const doc = this._record(result, { force: body?.record === true });
+      return { body: withDoc(presentResult(result), doc) };
     }
 
     if (root === 'curl' && id === 'parse' && method === 'POST') {
@@ -545,7 +583,7 @@ class ControlServer {
       if (method === 'POST' && id && action === 'send') {
         const hit = ai.findRequest(id);
         if (!hit) return { status: 404, body: { error: 'Request not found in the AI workspace' } };
-        return this._aiSend(hit.request, hit.collection);
+        return this._aiSend(hit.request, hit.collection, { record: body?.record === true });
       }
     }
 
@@ -559,14 +597,14 @@ class ControlServer {
       } else {
         fields = pickRequestFields(body || {});
       }
-      return this._aiSend(defaultRequest(fields), null);
+      return this._aiSend(defaultRequest(fields), null, { record: body?.record === true });
     }
 
     return { status: 404, body: { error: `No AI route for ${method} /${seg.join('/')}` } };
   }
 
   /** Run a request under AI guardrails, resolving variables from the user's environments. */
-  async _aiSend(request, collection) {
+  async _aiSend(request, collection, { record = false } = {}) {
     const policy = this._policy();
     const userState = this.workspace.getState();
 
@@ -584,6 +622,9 @@ class ControlServer {
 
     this.onEvent({ type: 'ai:changed' });
 
+    // A send refused by the guardrails never happened, so it is not documented.
+    const doc = result.response?.blocked ? null : this._record(result, { force: record, requestId: request.id });
+
     if (result.response?.blocked) {
       return {
         status: 403,
@@ -594,7 +635,63 @@ class ControlServer {
         },
       };
     }
-    return { body: presentResult(result) };
+    return { body: withDoc(presentResult(result), doc) };
+  }
+
+  /** Test documentation: read and edit docs, drive the recording. */
+  _routeDocs(method, seg, url, body) {
+    const docs = this.docs;
+    if (!docs) return { status: 503, body: { error: 'Test docs are not available' } };
+    const [, id, sub, stepId, action] = seg;
+
+    if (id === 'recording') {
+      if (method === 'GET') return { body: docs.recording() };
+      if (method === 'POST') {
+        if (body?.docId && !docs.get(body.docId)) return { status: 404, body: { error: 'Doc not found' } };
+        return { status: 201, body: docs.startRecording({ name: body?.name, description: body?.description, mode: body?.mode, docId: body?.docId }) };
+      }
+      if (method === 'PATCH') {
+        const rec = docs.setRecording(body || {});
+        return rec ? { body: rec } : { status: 404, body: { error: 'Nothing is being recorded' } };
+      }
+      if (method === 'DELETE') {
+        return docs.stopRecording() ? { body: { stopped: true } } : { status: 404, body: { error: 'Nothing is being recorded' } };
+      }
+    }
+
+    if (method === 'GET' && !id) return { body: { docs: docs.list(), recording: docs.recording() } };
+
+    const doc = id ? docs.get(id) : null;
+    if (id && !doc) return { status: 404, body: { error: 'Doc not found' } };
+
+    if (!sub) {
+      if (method === 'GET') return { body: presentDoc(doc, url.searchParams.get('bodies') === 'full') };
+      if (method === 'PATCH') {
+        docs.update(id, { name: body?.name, description: body?.description });
+        return { body: presentDoc(docs.get(id), false) };
+      }
+      if (method === 'DELETE') {
+        return { status: 403, body: { error: 'Deleting a whole doc is only possible in the app. You can delete individual steps.' } };
+      }
+    }
+
+    if (sub === 'steps' && stepId) {
+      if (!docs.findStep(id, stepId)) return { status: 404, body: { error: 'Step not found in that doc' } };
+      if (method === 'PATCH' && !action) {
+        if (body?.status && !['untested', 'pass', 'fail'].includes(body.status)) {
+          return { status: 400, body: { error: 'status must be untested, pass or fail' } };
+        }
+        return { body: docs.updateStep(id, stepId, body || {}) };
+      }
+      if (method === 'DELETE' && !action) return { body: { deleted: docs.deleteStep(id, stepId) } };
+      if (method === 'POST' && action === 'move') {
+        if (!Number.isInteger(body?.index)) return { status: 400, body: { error: 'index (a zero-based integer) is required' } };
+        docs.moveStep(id, stepId, body.index);
+        return { body: { order: docs.get(id).steps.map((s) => s.id) } };
+      }
+    }
+
+    return { status: 404, body: { error: `No docs route for ${method} /${seg.join('/')}` } };
   }
 
   /** Shared by the per-request and per-collection sync routes. */
@@ -737,6 +834,29 @@ function presentResult(result) {
   }
 
   return out;
+}
+
+function withDoc(payload, doc) {
+  return doc ? { ...payload, doc } : payload;
+}
+
+// Enough of each body for an agent to write notes about, without flooding it.
+const AGENT_BODY_CHARS = 8000;
+
+function presentDoc(doc, fullBodies) {
+  const cut = (text) =>
+    text == null || fullBodies || text.length <= AGENT_BODY_CHARS
+      ? text
+      : `${text.slice(0, AGENT_BODY_CHARS)}\n...[${text.length - AGENT_BODY_CHARS} more characters — ask with ?bodies=full]`;
+  return {
+    ...doc,
+    steps: doc.steps.map((s, index) => ({
+      index,
+      ...s,
+      request: { ...s.request, body: cut(s.request.body) },
+      response: s.response ? { ...s.response, body: cut(s.response.body) } : null,
+    })),
+  };
 }
 
 function countRequests(ws) {

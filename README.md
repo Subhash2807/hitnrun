@@ -45,7 +45,7 @@ git tag v1.4.0 && git push origin v1.4.0
 npm install
 npm run dev      # hot-reloading development window
 npm start        # build once, then run the app
-npm test         # 114 headless tests of the engine, parser, sandbox and agent API
+npm test         # 128 headless tests of the engine, parser, sandbox and agent API
 ```
 
 ### Building installers
@@ -147,6 +147,14 @@ right places. Works with `\` (Unix) and `^` (Windows) line continuations,
 **Copy as cURL** on any request (the `>_` icon, or `Ctrl/Cmd+Shift+C`) regenerates the command,
 with `{{variables}}` resolved.
 
+**See the code** — the icon rail on the right of every request opens a **Code snippet**
+panel (also *View code* in the ⋯ menu): the request as cURL, JavaScript `fetch` or
+Python `requests`, with a Copy button. `{{variables}}` stay as written unless you tick
+*Fill in variables*. The ⓘ icon shows the request's id, location and timestamps.
+
+**Import a Postman collection** (v2.0 / v2.1) from the sidebar's **+** menu or
+*File → Import Postman Collection…* — folders, headers, auth and bodies come across.
+
 **Duplicate** any request from the sidebar, the ⋯ menu, or `Ctrl/Cmd+D`.
 
 **Bulk edit** — headers, query params, path variables and form fields each have a
@@ -235,6 +243,28 @@ are remembered.
 
 **Folders** can be renamed and deleted from their ⋯ menu.
 
+### Test docs — a record of what you tested
+
+Press **● Record** (top bar) before you start testing a feature. Every request you
+send is written down in order — the complete URL with variables filled in, the
+headers and body that went out, and the full response — so at the end you have
+something to hand over instead of trying to remember what you clicked.
+
+- **Auto** mode records every send. **Manual** mode records only the responses you
+  add with **+ Add to doc**. Switch modes, pause or stop from the red recording chip.
+  One recording runs at a time; you can resume any doc later.
+- Docs live in their own **Docs** sidebar tab (it appears once you record something)
+  and open in the main area like a request. Rename steps, drag to reorder, delete the
+  ones you don't need, mark each **Pass / Fail**, and add an *expected result* and a
+  note. Headers and bodies are collapsed until you open them.
+- **Download** as **Markdown** (collapsed `<details>` sections, pastes into GitHub,
+  Jira, Confluence), a single-file **HTML** page, **PDF**, or a **Postman collection**
+  that re-runs the steps in order. Secrets — Authorization, cookies, API keys, tokens,
+  password fields — are masked by default, keeping the last four characters.
+- Claude can record too: its sends land in the doc (marked *Claude*), and over MCP it
+  can read docs and write the step titles, notes, expected results and pass/fail for
+  you. Deleting a whole doc stays in your hands.
+
 ### Keyboard
 
 | | |
@@ -245,6 +275,7 @@ are remembered.
 | `Ctrl/Cmd + Shift + C` | Copy as cURL |
 | `Ctrl/Cmd + Shift + V` | Import cURL from clipboard |
 | `Ctrl/Cmd + W` | Close tab |
+| `Ctrl/Cmd + =` / `-` / `0` | Zoom in / out / reset (remembered) |
 
 ---
 
@@ -404,7 +435,16 @@ curl -X POST 127.0.0.1:47600/send \
 | `GET` | `/sync/status` | which requests are in sync vs drifted, and why |
 | `POST` | `/requests/:id/sync` | pull headers + host from the source |
 | `POST` | `/collections/:id/sync` | sync every request in a collection or folder |
-| `POST` | `/ui/open` | `{ requestId }` — open in a tab and focus the window |
+| `POST` | `/ui/open` | `{ requestId }` — open a request or doc in a tab and focus the window |
+| `GET` | `/docs` | test docs and the current recording |
+| `GET` | `/docs/:id` | one doc with every step (`?bodies=full` for uncut bodies) |
+| `PATCH` | `/docs/:id` | `{ name?, description? }` |
+| `PATCH` | `/docs/:id/steps/:stepId` | `{ title?, note?, expected?, status }` |
+| `DELETE` | `/docs/:id/steps/:stepId` | remove a step |
+| `POST` | `/docs/:id/steps/:stepId/move` | `{ index }` |
+| `GET` `POST` `PATCH` `DELETE` | `/docs/recording` | read, start (`{ name, mode, docId? }`), change (`{ mode?, paused? }`), stop |
+
+Any send route also takes `record: true` to add that send to the recording even in manual mode.
 
 Which makes the whole session refresh a two-liner from a terminal:
 
@@ -436,9 +476,13 @@ electron/
   runner.js          resolve -> pre-script -> send -> tests -> history
   scripts.js         node:vm sandbox, pm.* API, chai-style expect
   control-server.js  the loopback API agents drive
+  docs.js            test docs: recording and steps (docs.json)
+  doc-export.js      Markdown / HTML / Postman export, secret masking
+  codegen.js         cURL / fetch / Python snippets for the Code panel
+  postman.js         Postman collection import
   preload.js         the only renderer <-> Node bridge
 src/                 React UI (Vite)
-test/smoke.js        headless tests for all of the above
+test/*.js            headless tests for all of the above
 ```
 
 Requests are sent from the **main process**, not the browser window. That is why
@@ -448,12 +492,13 @@ and why TLS verification can be turned off per request.
 The renderer never has Node access: `contextIsolation` is on, `nodeIntegration`
 is off, and a strict CSP blocks any external resource load.
 
-Your data lives in one file:
+Your data lives in one folder:
 
-- Windows — `%APPDATA%\hitnrun\workspace.json`
-- macOS — `~/Library/Application Support/hitnrun/workspace.json`
+- Windows — `%APPDATA%\hitnrun\`
+- macOS — `~/Library/Application Support/hitnrun/`
 
-Back it up by copying that file.
+`workspace.json` holds your requests, `docs.json` your test docs and
+`ai-workspace.json` the AI sessions. Back them up by copying those files.
 
 ---
 

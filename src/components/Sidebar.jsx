@@ -3,6 +3,7 @@ import { useStore, api, walkRequests } from '../store.js';
 import Dropdown, { Item, Separator } from './Dropdown.jsx';
 import { SyncDot } from './SyncIndicator.jsx';
 import AiWorkspacePanel from './AiWorkspacePanel.jsx';
+import DocsPanel from './DocsPanel.jsx';
 import {
   IconSearch, IconPlus, IconMore, IconChevronDown, IconChevronRight,
   IconFolder, IconLayers, IconClock, IconTrash, IconCopy, IconSync, IconTerminal,
@@ -12,7 +13,10 @@ import { METHOD_COLORS, relativeTime, statusClass } from '../lib/format.js';
 export default function Sidebar() {
   const state = useStore((s) => s.state);
   const patchUi = useStore((s) => s.patchUi);
-  const tab = state?.ui?.sidebarTab || 'collections';
+  const hasDocs = useStore((s) => s.docs.length > 0 || !!s.recording);
+  // The Docs tab stays out of the way until you have recorded something.
+  let tab = state?.ui?.sidebarTab || 'collections';
+  if (tab === 'docs' && !hasDocs) tab = 'collections';
 
   return (
     <div className="sidebar" style={{ width: state?.ui?.sidebarWidth || 280 }}>
@@ -22,6 +26,7 @@ export default function Sidebar() {
           ['environments', 'Env'],
           ['history', 'History'],
           ['ai', 'AI'],
+          ...(hasDocs ? [['docs', 'Docs']] : []),
         ].map(([id, label]) => (
           <button
             key={id}
@@ -37,6 +42,7 @@ export default function Sidebar() {
       {tab === 'environments' && <EnvironmentsList />}
       {tab === 'history' && <HistoryList />}
       {tab === 'ai' && <AiWorkspacePanel />}
+      {tab === 'docs' && <DocsPanel />}
     </div>
   );
 }
@@ -90,6 +96,9 @@ function CollectionsTree() {
         >
           <Item onClick={() => createRequest(collections[0]?.id)}>New Request</Item>
           <Item onClick={() => openModal({ type: 'newCollection' })}>New Collection</Item>
+          <Item onClick={() => useStore.getState().importPostman()}>Import Postman collection…</Item>
+          <Separator />
+          <Item onClick={() => openModal({ type: 'startRecording' })}>Start a test doc…</Item>
         </Dropdown>
       </div>
 

@@ -11,6 +11,10 @@ const { execute } = require('./runner');
 const { parseCurl, toCurl, looksLikeCurl } = require('./curl');
 const { ControlServer } = require('./control-server');
 const { parseSource, buildPatch, syncState, describeChanges } = require('./sync');
+const { DocStore } = require('./docs');
+const docExport = require('./doc-export');
+const { importPostman } = require('./postman');
+const codegen = require('./codegen');
 
 // Only `npm run dev` sets this. Running unpackaged (`electron .`) still loads the
 // built bundle, so the window is never blank just because Vite isn't up.
@@ -19,6 +23,7 @@ const isDev = process.env.NODE_ENV === 'development';
 let mainWindow = null;
 let workspace = null;
 let aiWorkspace = null;
+let docs = null;
 let controlServer = null;
 let controlStatus = { running: false, port: null, error: null };
 
@@ -43,6 +48,28 @@ function createWindow() {
   });
 
   mainWindow.once('ready-to-show', () => mainWindow.show());
+
+  // Zoom is handled here rather than by the menu roles: the zoomIn role's
+  // accelerator is Ctrl+Plus, which on most keyboards needs Shift, so plain
+  // Ctrl+= did nothing. Zoom is also remembered across restarts.
+  mainWindow.webContents.on('did-finish-load', () => {
+    const level = workspace.getState().settings.zoomLevel;
+    if (typeof level === 'number') mainWindow.webContents.setZoomLevel(level);
+  });
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown' || !(input.control || input.meta) || input.alt) return;
+    const key = input.key;
+    if (key === '=' || key === '+' || input.code === 'NumpadAdd') {
+      zoomBy(0.5);
+      event.preventDefault();
+    } else if (key === '-' || key === '_' || input.code === 'NumpadSubtract') {
+      zoomBy(-0.5);
+      event.preventDefault();
+    } else if (key === '0' || input.code === 'Numpad0') {
+      zoomBy(null);
+      event.preventDefault();
+    }
+  });
 
   const bundle = path.join(__dirname, '..', 'dist', 'index.html');
 
@@ -71,6 +98,15 @@ function createWindow() {
   });
 }
 
+/** Step the zoom by `delta` levels, or reset with null. Clamped to -3..+5. */
+function zoomBy(delta) {
+  const wc = mainWindow?.webContents;
+  if (!wc) return;
+  const next = delta == null ? 0 : Math.max(-3, Math.min(5, wc.getZoomLevel() + delta));
+  wc.setZoomLevel(next);
+  workspace.patchSettings({ zoomLevel: next });
+}
+
 /* -------------------------------------------------------------------- menu */
 
 function buildMenu() {
@@ -88,6 +124,7 @@ function buildMenu() {
         { label: 'Duplicate Request', accelerator: 'CmdOrCtrl+D', click: emit('request:duplicate') },
         { label: 'Copy as cURL', accelerator: 'CmdOrCtrl+Shift+C', click: emit('request:copyCurl') },
         { label: 'Import cURL from Clipboard', accelerator: 'CmdOrCtrl+Shift+V', click: emit('request:importCurl') },
+        { label: 'Import Postman Collection…', click: emit('collection:import') },
         { type: 'separator' },
         { label: 'Close Tab', accelerator: 'CmdOrCtrl+W', click: emit('tab:close') },
         isMac ? { role: 'close' } : { role: 'quit' },
@@ -108,9 +145,10 @@ function buildMenu() {
         { role: 'reload' },
         { role: 'toggleDevTools' },
         { type: 'separator' },
-        { role: 'resetZoom' },
-        { role: 'zoomIn' },
-        { role: 'zoomOut' },
+        // Shown for discoverability; the keys themselves are caught in before-input-event.
+        { label: 'Actual Size', accelerator: 'CmdOrCtrl+0', registerAccelerator: false, click: () => zoomBy(null) },
+        { label: 'Zoom In', accelerator: 'CmdOrCtrl+=', registerAccelerator: false, click: () => zoomBy(0.5) },
+        { label: 'Zoom Out', accelerator: 'CmdOrCtrl+-', registerAccelerator: false, click: () => zoomBy(-0.5) },
         { type: 'separator' },
         { role: 'togglefullscreen' },
       ],
@@ -175,6 +213,8 @@ async function startControlServer() {
   controlServer = new ControlServer({
     workspace,
     aiWorkspace,
+    docs,
+    environmentName: activeEnvironmentName,
     onEvent: (event) => {
       mainWindow?.webContents.send('control:event', event);
       if (event.focus && mainWindow) {
@@ -210,6 +250,13 @@ app.whenReady().then(async () => {
     });
   });
 
+  docs = new DocStore(path.join(app.getPath('userData'), 'docs.json'));
+  docs.load();
+  docs.on('changed', ({ reason, docId }) => {
+    mainWindow?.webContents.send('docs:changed', { reason, docId, ...docsSnapshot() });
+  });
+  docs.on('error', (err) => console.error('[docs]', err));
+
   // Every mutation — from the UI or from an agent — refreshes the window.
   // Sync states ride along so the indicators never need a second round trip.
   workspace.on('changed', ({ reason, detail, state }) => {
@@ -239,6 +286,7 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   workspace?.saveNow(); // flush any pending debounced write
   aiWorkspace?.saveNow();
+  docs?.saveNow();
   controlServer?.stop();
 });
 
@@ -254,6 +302,49 @@ const ALLOWED_WS_METHODS = new Set([
   'addHistory', 'clearHistory', 'patchUi', 'patchSettings',
   'findRequest',
 ]);
+
+// Only these doc-store methods are reachable from the renderer.
+const ALLOWED_DOC_METHODS = new Set([
+  'get', 'create', 'update', 'remove', 'duplicate',
+  'startRecording', 'setRecording', 'stopRecording',
+  'updateStep', 'deleteStep', 'moveStep',
+]);
+
+function docsSnapshot() {
+  return { docs: docs.list(), recording: docs.recording() };
+}
+
+function activeEnvironmentName() {
+  const state = workspace.getState();
+  return state.environments.find((e) => e.id === state.activeEnvironmentId)?.name || null;
+}
+
+/** Offer a finished send to the recording. Only lands if recording in auto mode, or forced. */
+function recordToDocs(result, meta = {}) {
+  if (!docs || !result) return null;
+  return docs.capture(result, { environment: activeEnvironmentName(), ...meta });
+}
+
+/** Render a doc for download. PDF prints the fully expanded HTML in a hidden window. */
+async function renderDoc(doc, format, mask) {
+  if (format === 'markdown') return Buffer.from(docExport.toMarkdown(doc, { mask }), 'utf8');
+  if (format === 'html') return Buffer.from(docExport.toHtml(doc, { mask }), 'utf8');
+  if (format === 'postman') return Buffer.from(docExport.toPostman(doc, { mask }), 'utf8');
+  if (format === 'pdf') {
+    const html = docExport.toHtml(doc, { mask, expandAll: true });
+    const tmp = path.join(app.getPath('temp'), `hitnrun-doc-${Date.now()}.html`);
+    fs.writeFileSync(tmp, html, 'utf8');
+    const win = new BrowserWindow({ show: false, webPreferences: { javascript: false } });
+    try {
+      await win.loadFile(tmp);
+      return await win.webContents.printToPDF({ printBackground: true, pageSize: 'A4' });
+    } finally {
+      win.destroy();
+      fs.rm(tmp, { force: true }, () => {});
+    }
+  }
+  throw new Error(`Unknown format "${format}"`);
+}
 
 /** Sync state for every request in the workspace, against the active environment. */
 function computeSyncStates() {
@@ -341,14 +432,101 @@ function registerIpc() {
     if (!hit) return { ok: false, error: { message: 'Request not found', code: 'ERR_NOT_FOUND' } };
     // Overrides let the UI run unsaved edits without a round-trip save first.
     const request = overrides ? { ...hit.request, ...overrides } : hit.request;
-    return execute(workspace, request, {
+    const result = await execute(workspace, request, {
       collection: hit.collection,
       onProgress: (p) => mainWindow?.webContents.send('req:progress', { requestId, ...p }),
     });
+    const step = recordToDocs(result, { source: 'user', requestId });
+    return step ? { ...result, docStepId: step.id } : result;
   });
 
   ipcMain.handle('req:sendAdHoc', async (_e, request) => {
-    return execute(workspace, defaultRequest(request), { collection: null });
+    const result = await execute(workspace, defaultRequest(request), { collection: null });
+    recordToDocs(result, { source: 'user' });
+    return result;
+  });
+
+  /* ------------------------------------------------------------ code panel */
+
+  ipcMain.handle('code:languages', () => codegen.LANGUAGES);
+  ipcMain.handle('code:generate', (_e, request, options = {}) => {
+    const hit = request?.id ? workspace.findRequest(request.id) : null;
+    try {
+      return {
+        ok: true,
+        code: codegen.generate(request, {
+          state: workspace.getState(),
+          collection: hit?.collection || null,
+          language: options.language,
+          resolve: !!options.resolve,
+        }),
+      };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
+  /* ------------------------------------------------------------------ docs */
+
+  ipcMain.handle('docs:list', () => docsSnapshot());
+  ipcMain.handle('docs:call', (_e, method, args = []) => {
+    if (!ALLOWED_DOC_METHODS.has(method)) throw new Error(`Doc method "${method}" is not exposed to the renderer`);
+    return docs[method](...args);
+  });
+
+  /** The "Add to doc" button: records the response on screen into the recording doc. */
+  ipcMain.handle('docs:addResult', (_e, result, meta = {}) => {
+    const rec = docs.recording();
+    if (!rec) return { ok: false, error: 'Start a recording first' };
+    const step = docs.addStep(rec.docId, result, {
+      environment: activeEnvironmentName(),
+      source: 'user',
+      requestId: meta.requestId,
+    });
+    return step ? { ok: true, stepId: step.id, docName: rec.name } : { ok: false, error: 'Nothing to add' };
+  });
+
+  ipcMain.handle('docs:export', async (_e, docId, format, { mask = true } = {}) => {
+    const doc = docs.get(docId);
+    if (!doc) return { ok: false, error: 'Doc not found' };
+    const spec = docExport.FORMATS[format];
+    if (!spec) return { ok: false, error: `Unknown format "${format}"` };
+    const result = await dialog.showSaveDialog(mainWindow, {
+      defaultPath: `${docExport.safeFileName(doc.name)}.${spec.ext}`,
+      filters: [spec.filter],
+    });
+    if (result.canceled || !result.filePath) return { ok: false, canceled: true };
+    try {
+      fs.writeFileSync(result.filePath, await renderDoc(doc, format, mask));
+      return { ok: true, path: result.filePath };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('docs:reveal', (_e, filePath) => {
+    if (filePath && fs.existsSync(filePath)) shell.showItemInFolder(filePath);
+  });
+
+  /* ------------------------------------------------------ postman import */
+
+  ipcMain.handle('collection:importPostman', async () => {
+    const picked = await dialog.showOpenDialog(mainWindow, {
+      title: 'Import a Postman collection',
+      properties: ['openFile'],
+      filters: [{ name: 'Postman collection', extensions: ['json'] }],
+    });
+    if (picked.canceled || !picked.filePaths[0]) return { ok: false, canceled: true };
+    let text;
+    try {
+      text = fs.readFileSync(picked.filePaths[0], 'utf8');
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+    const parsed = importPostman(text);
+    if (!parsed.ok) return parsed;
+    workspace.importCollection(parsed.collection);
+    return { ok: true, id: parsed.collection.id, name: parsed.collection.name };
   });
 
   ipcMain.handle('curl:parse', (_e, text) => parseCurl(text));

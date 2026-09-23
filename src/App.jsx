@@ -3,8 +3,10 @@ import { useStore, api, findRequest } from './store.js';
 import Sidebar from './components/Sidebar.jsx';
 import RequestView from './components/RequestView.jsx';
 import Modals from './components/Modals.jsx';
+import DocView from './components/DocView.jsx';
+import { RecordControl } from './components/DocsPanel.jsx';
 import Dropdown, { Item, Separator } from './components/Dropdown.jsx';
-import { IconPlus, IconClose, IconSettings, IconChevronDown, IconSync } from './components/Icons.jsx';
+import { IconPlus, IconClose, IconSettings, IconChevronDown, IconSync, IconDoc } from './components/Icons.jsx';
 import { METHOD_COLORS } from './lib/format.js';
 
 export default function App() {
@@ -33,6 +35,7 @@ export default function App() {
       const active = useStore.getState().state?.ui?.activeTabId;
       if (command === 'request:new') createRequest(useStore.getState().state?.collections?.[0]?.id);
       else if (command === 'collection:new') openModal({ type: 'newCollection' });
+      else if (command === 'collection:import') useStore.getState().importPostman();
       else if (command === 'tab:close' && active) closeTab(active);
       else if (command === 'tab:next') cycleTab(1);
       else if (command === 'tab:prev') cycleTab(-1);
@@ -57,7 +60,9 @@ export default function App() {
         <SidebarResizer />
         <div className="main">
           <TabBar />
-          {activeTabId ? (
+          {activeTabId?.startsWith('doc_') ? (
+            <DocView key={activeTabId} docId={activeTabId} />
+          ) : activeTabId ? (
             // Keyed so switching tabs resets per-request local UI state.
             <RequestView key={activeTabId} requestId={activeTabId} theme={theme} />
           ) : (
@@ -90,6 +95,8 @@ function TopBar() {
       </div>
 
       <div className="topbar-spacer" />
+
+      <RecordControl />
 
       <span
         className={`badge ${control.running ? 'live' : ''}`}
@@ -157,12 +164,39 @@ function TabBar() {
   const createRequest = useStore((s) => s.createRequest);
   // Subscribe to drafts so a tab's title/method updates while you type.
   const drafts = useStore((s) => s.drafts);
+  const docs = useStore((s) => s.docs);
+  const recording = useStore((s) => s.recording);
 
   const tabs = state.ui.tabs || [];
 
   return (
     <div className="tabbar">
       {tabs.map((id) => {
+        if (id.startsWith('doc_')) {
+          const doc = docs.find((d) => d.id === id);
+          if (!doc) return null;
+          return (
+            <div
+              key={id}
+              className={`tab ${state.ui.activeTabId === id ? 'active' : ''}`}
+              onClick={() => setActiveTab(id)}
+              onAuxClick={(e) => e.button === 1 && closeTab(id, { skipFlush: true })}
+              title={`Test doc: ${doc.name}`}
+            >
+              {recording?.docId === id ? <span className="rec-dot pulse" /> : <IconDoc width={13} height={13} className="dim" />}
+              <span className="tab-name">{doc.name}</span>
+              <button
+                className="tab-close"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  closeTab(id, { skipFlush: true });
+                }}
+              >
+                <IconClose width={11} height={11} />
+              </button>
+            </div>
+          );
+        }
         const hit = findRequest(state, id);
         if (!hit) return null;
         const request = drafts[id] || hit.request;
