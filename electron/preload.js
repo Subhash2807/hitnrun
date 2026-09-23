@@ -36,6 +36,7 @@ contextBridge.exposeInMainWorld('api', {
   aiDeleteNode: (nodeId) => ipcRenderer.invoke('ai:deleteNode', nodeId),
   aiSetPolicy: (policy) => ipcRenderer.invoke('ai:setPolicy', policy),
   aiSetupInfo: () => ipcRenderer.invoke('ai:setupInfo'),
+  aiConnectClaudeCode: () => ipcRenderer.invoke('ai:connectClaudeCode'),
   onAiChanged: (cb) => subscribe('ai:changed', cb),
 
   /* test docs ------------------------------------------------------------- */

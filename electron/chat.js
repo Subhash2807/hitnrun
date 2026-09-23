@@ -16,7 +16,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { spawn, execFile } = require('node:child_process');
 const { EventEmitter } = require('node:events');
-const { PROVIDERS, findExecutable, resolveLaunch, childPath } = require('./chat-providers');
+const { PROVIDERS, findExecutable, resolveLaunch, childPath, parseHelpFlags } = require('./chat-providers');
 
 const uid = (prefix) => `${prefix}_${crypto.randomBytes(8).toString('hex')}`;
 
@@ -78,6 +78,7 @@ class ChatManager extends EventEmitter {
     this._saveTimer = null;
     this._emitTimers = new Map();
     this._detected = null;
+    this._flags = new Map(); // provider id -> { listed: Set | null, rejected: Set }
   }
 
   /* --------------------------------------------------------- persistence */
@@ -233,6 +234,7 @@ class ChatManager extends EventEmitter {
   /** Which CLIs are installed, with their versions. Cached until `force`. */
   async detect(force = false) {
     if (this._detected && !force) return this._detected;
+    this._flags.clear();
     const out = {};
     await Promise.all(
       Object.values(PROVIDERS).map(async (p) => {
@@ -250,6 +252,42 @@ class ChatManager extends EventEmitter {
     return out;
   }
 
+  /**
+   * Register hitnrun's MCP server with the user's own Claude Code, so a
+   * `claude` session in any terminal can use the app. Replaces an older entry,
+   * which may point at a previous install.
+   */
+  async connectClaudeCode(spec) {
+    const detected = await this.detect(true);
+    const file = detected.claude?.path;
+    if (!file) return { ok: false, message: `Claude Code isn't installed. Install it with: ${PROVIDERS.claude.install}` };
+    await runCli(file, ['mcp', 'remove', 'hitnrun', '--scope', 'user']);
+    const envFlags = Object.entries(spec.env).flatMap(([k, v]) => ['--env', `${k}=${v}`]);
+    const added = await runCli(file, ['mcp', 'add', 'hitnrun', '--scope', 'user', ...envFlags, '--', spec.command, ...spec.args]);
+    if (!added.ok) return { ok: false, message: (added.stderr || added.stdout || 'claude mcp add failed').trim().slice(0, 600) };
+    return { ok: true, message: 'Connected. Start a new claude session in your terminal to use it.' };
+  }
+
+  /** Which optional options the installed CLI knows, read once from its --help. */
+  async _probeFlags(provider) {
+    if (!provider.optional || this._flags.has(provider.id)) return;
+    const file = this._detected?.[provider.id]?.path || findExecutable(provider.binaries);
+    const help = file ? await runText(file, ['--help']) : null;
+    this._flags.set(provider.id, { listed: help ? parseHelpFlags(help) : null, rejected: new Set() });
+  }
+
+  /** A predicate for the adapter: pass this option or not. */
+  _supports(provider) {
+    // Adapters without optional options have no system-prompt flag either.
+    if (!provider.optional) return () => false;
+    const known = this._flags.get(provider.id);
+    return (flag) => {
+      if (known?.rejected.has(flag)) return false;
+      // Unreadable help: try everything, and drop what the CLI rejects.
+      return known?.listed ? known.listed.has(flag) : true;
+    };
+  }
+
   /* ------------------------------------------------------------- sending */
 
   /**
@@ -265,6 +303,8 @@ class ChatManager extends EventEmitter {
     if (run?.busy) throw new Error('Wait for the reply to finish, or stop it first');
 
     const provider = PROVIDERS[chat.provider];
+    const alive = provider.caps.persistent && run?.child && run.child.exitCode === null;
+    if (!alive) await this._probeFlags(provider);
     const isFirst = !chat.messages.some((m) => m.role === 'user');
     if (isFirst) chat.title = body.replace(/\s+/g, ' ').slice(0, 60);
 
@@ -276,12 +316,13 @@ class ChatManager extends EventEmitter {
 
     let prompt = context ? `${context}\n\n${body}` : body;
     // CLIs without a system-prompt flag get the instructions with the first message.
-    if (provider.id !== 'claude' && !chat.sessionId) prompt = `<instructions>\n${SYSTEM_PROMPT}\n</instructions>\n\n${prompt}`;
+    if (!this._supports(provider)('--append-system-prompt') && !chat.sessionId) prompt = `<instructions>\n${SYSTEM_PROMPT}\n</instructions>\n\n${prompt}`;
 
     try {
-      if (provider.caps.persistent && run?.child && run.child.exitCode === null) {
+      if (alive) {
         run.busy = true;
         run.reply = reply;
+        run.prompt = prompt;
         clearTimeout(run.idleTimer);
         run.child.stdin.write(provider.encode(prompt));
       } else {
@@ -310,7 +351,7 @@ class ChatManager extends EventEmitter {
 
   /* ------------------------------------------------------------ internal */
 
-  _start(chat, provider, reply, prompt) {
+  _start(chat, provider, reply, prompt, attempt = 0) {
     const settings = this.settings() || {};
     const workDir = path.join(this.workRoot, chat.id);
     fs.mkdirSync(workDir, { recursive: true });
@@ -326,6 +367,7 @@ class ChatManager extends EventEmitter {
       prompt,
       workDir,
       command: settings.customCommand,
+      supports: this._supports(provider),
     });
 
     let file = spec.file || this._detected?.[provider.id]?.path || findExecutable(provider.binaries);
@@ -349,7 +391,7 @@ class ChatManager extends EventEmitter {
       shell: !!launch.shell,
     });
 
-    const run = { child, provider, busy: true, reply, stopping: false, retired: false, idleTimer: null, stderr: '' };
+    const run = { child, provider, busy: true, reply, prompt, attempt, stopping: false, retired: false, idleTimer: null, stderr: '' };
     this.runs.set(chat.id, run);
 
     const parse = provider.parser();
@@ -375,7 +417,8 @@ class ChatManager extends EventEmitter {
       this._forget(chat.id, run);
     });
 
-    child.on('exit', (code) => {
+    // 'close', not 'exit': by then stdout and stderr have been read to the end.
+    child.on('close', (code) => {
       if (buffer.trim()) for (const event of parse(buffer)) this._apply(chat, run, event);
       buffer = '';
       if (run.busy) {
@@ -385,6 +428,8 @@ class ChatManager extends EventEmitter {
           this._settleTools(target, 'stopped');
           run.busy = false;
           this.touch(chat, { now: true });
+        } else if (this._retryWithout(chat, run, code)) {
+          return;
         } else if (provider.id === 'custom' && code === 0) {
           this._finish(chat, run, {});
         } else {
@@ -490,6 +535,26 @@ class ChatManager extends EventEmitter {
     for (const part of reply.parts) if (part.kind === 'tool' && part.status === 'running') part.status = status;
   }
 
+  /**
+   * An older CLI that rejects one of our optional options is started again
+   * without it, so the user never sees "unknown option".
+   */
+  _retryWithout(chat, run, code) {
+    const { provider } = run;
+    if (!provider.optional || code === 0 || run.attempt >= provider.optional.length) return false;
+    const m = /unknown option\s+'?(--[\w-]+)/i.exec(run.stderr);
+    if (!m || !provider.optional.includes(m[1])) return false;
+    if (!this._flags.has(provider.id)) this._flags.set(provider.id, { listed: null, rejected: new Set() });
+    this._flags.get(provider.id).rejected.add(m[1]);
+    this._forget(chat.id, run);
+    try {
+      this._start(chat, provider, run.reply, run.prompt, run.attempt + 1);
+    } catch (err) {
+      this._fail(chat, run.reply, err.message);
+    }
+    return true;
+  }
+
   _explain(provider, stderr, code) {
     const tail = String(stderr || '').trim().split('\n').slice(-6).join('\n');
     let message = `${provider.label} stopped unexpectedly${code != null ? ` (exit code ${code})` : ''}.`;
@@ -523,14 +588,27 @@ class ChatManager extends EventEmitter {
   }
 }
 
-function version(file) {
+/** Run a CLI briefly: { ok, stdout, stderr }. */
+function runCli(file, args) {
   return new Promise((resolve) => {
     const { command, prefix, shell } = resolveLaunch(file);
-    execFile(command, [...prefix, '--version'], { timeout: 8000, windowsHide: true, shell: !!shell, env: { ...process.env, PATH: childPath() } }, (err, stdout) => {
-      if (err) return resolve(null);
-      resolve(String(stdout).trim().split('\n')[0].slice(0, 60) || null);
+    const env = { ...process.env, PATH: childPath() };
+    delete env.ELECTRON_RUN_AS_NODE;
+    execFile(command, [...prefix, ...args], { timeout: 15000, windowsHide: true, shell: !!shell, env, maxBuffer: 1 << 20 }, (err, stdout, stderr) => {
+      resolve({ ok: !err, stdout: String(stdout || ''), stderr: String(stderr || '') });
     });
   });
+}
+
+/** A CLI's stdout, or null if it failed. */
+async function runText(file, args) {
+  const out = await runCli(file, args);
+  return out.ok ? out.stdout : null;
+}
+
+async function version(file) {
+  const out = await runText(file, ['--version']);
+  return out ? out.trim().split('\n')[0].slice(0, 60) || null : null;
 }
 
 module.exports = { ChatManager, SYSTEM_PROMPT, shortToolName };

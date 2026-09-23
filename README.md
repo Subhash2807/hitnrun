@@ -77,9 +77,15 @@ guardrails**.
 
 ## Use it from Claude Code
 
-You can also let Claude Code (in your terminal) work with the app. Open the
-**AI** tab in the sidebar, click **Set up AI access**, and run the command it
-shows.
+You can also let Claude Code (in your terminal) work with the app:
+
+1. Open the **AI** tab in the sidebar and click **Set up AI access**.
+2. Click **Connect Claude Code**.
+3. Start a **new** `claude` session in your terminal and ask, for example,
+   *"Create a dummy GET request in hitnrun and send it."*
+
+Keep hitnrun open while you do. To check it's connected, run `claude mcp list`
+and look for `hitnrun`.
 
 ## Keyboard shortcuts
 

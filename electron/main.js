@@ -702,6 +702,7 @@ function registerIpc() {
     }))
   );
   ipcMain.handle('chat:detect', (_e, force) => chats.detect(!!force));
+  ipcMain.handle('ai:connectClaudeCode', () => chats.connectClaudeCode(mcpLaunchSpec()));
   ipcMain.handle('chat:list', () => chats.list());
   ipcMain.handle('chat:get', (_e, id) => chats.get(id));
   ipcMain.handle('chat:create', (_e, options) => chats.create(options));

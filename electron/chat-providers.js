@@ -137,6 +137,24 @@ function toml(value) {
   return JSON.stringify(String(value));
 }
 
+/** Claude Code's own tools, turned off when the CLI is too old for `--tools ""`. */
+const CLAUDE_BUILTIN_TOOLS = [
+  'Bash', 'BashOutput', 'KillShell', 'Edit', 'MultiEdit', 'Write', 'NotebookEdit', 'Read', 'Glob', 'Grep',
+  'LS', 'WebFetch', 'WebSearch', 'Task', 'TodoWrite', 'SlashCommand', 'Skill',
+];
+
+/** The long options a CLI's --help lists, e.g. `--tools`. */
+function parseHelpFlags(help) {
+  const flags = new Set();
+  for (const line of String(help || '').split('\n')) {
+    const m = /^\s{1,6}(?:-\w,\s*)?(--[\w-]+)(?:,\s*(--[\w-]+))?/.exec(line);
+    if (!m) continue;
+    flags.add(m[1]);
+    if (m[2]) flags.add(m[2]);
+  }
+  return flags;
+}
+
 /* ----------------------------------------------------------- adapters */
 
 const claude = {
@@ -155,24 +173,24 @@ const claude = {
   // One process per chat, kept open between messages.
   caps: { persistent: true, resume: true, toolEvents: true, cost: true },
 
-  launch({ mcp, model, resumeId, systemPrompt, workDir }) {
+  // Options added in later Claude Code versions. Each is passed only when the
+  // installed CLI lists it in --help, so older installs still start.
+  optional: ['--include-partial-messages', '--strict-mcp-config', '--tools', '--permission-prompts', '--append-system-prompt'],
+
+  launch({ mcp, model, resumeId, systemPrompt, workDir, supports = () => true }) {
     const config = path.join(workDir, 'claude-mcp.json');
     fs.writeFileSync(config, JSON.stringify({ mcpServers: { hitnrun: mcp } }), 'utf8');
-    const args = [
-      '-p',
-      '--input-format', 'stream-json',
-      '--output-format', 'stream-json',
-      '--verbose',
-      '--include-partial-messages',
-      '--mcp-config', config,
-      '--strict-mcp-config',
-      // No built-in tools at all: no shell, no file access. Only hitnrun's.
-      '--tools', '',
-      '--allowedTools', 'mcp__hitnrun',
-      // Anything that would need a prompt is refused rather than hanging.
-      '--permission-prompts', 'none',
-      '--append-system-prompt', systemPrompt,
-    ];
+    const args = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose'];
+    if (supports('--include-partial-messages')) args.push('--include-partial-messages');
+    args.push('--mcp-config', config);
+    if (supports('--strict-mcp-config')) args.push('--strict-mcp-config');
+    // No built-in tools at all: no shell, no file access. Only hitnrun's.
+    if (supports('--tools')) args.push('--tools', '');
+    else args.push('--disallowedTools', ...CLAUDE_BUILTIN_TOOLS);
+    args.push('--allowedTools', 'mcp__hitnrun');
+    // Anything that would need a prompt is refused rather than hanging.
+    if (supports('--permission-prompts')) args.push('--permission-prompts', 'none');
+    if (supports('--append-system-prompt')) args.push('--append-system-prompt', systemPrompt);
     if (model) args.push('--model', model);
     if (resumeId) args.push('--resume', resumeId);
     return { args };
@@ -396,4 +414,4 @@ function splitCommand(text) {
 
 const PROVIDERS = { claude, codex, gemini, custom };
 
-module.exports = { PROVIDERS, findExecutable, resolveLaunch, childPath, splitCommand, toText };
+module.exports = { PROVIDERS, findExecutable, resolveLaunch, childPath, splitCommand, toText, parseHelpFlags };

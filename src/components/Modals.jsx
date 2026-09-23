@@ -696,6 +696,20 @@ function AiSetupModal() {
     showToast(`${label} copied`);
   };
 
+  const [connecting, setConnecting] = useState(false);
+  const [result, setResult] = useState(null);
+  const connect = async () => {
+    setConnecting(true);
+    setResult(null);
+    try {
+      setResult(await api.aiConnectClaudeCode());
+    } catch (err) {
+      setResult({ ok: false, message: err.message });
+    } finally {
+      setConnecting(false);
+    }
+  };
+
   return (
     <div className="modal" style={{ maxWidth: 680 }}>
       <Head title="Connect an AI assistant" />
@@ -713,7 +727,18 @@ function AiSetupModal() {
             <div className="setup-step">
               <div className="setup-num">1</div>
               <div>
-                <strong>Claude Code</strong> — run this once, in a terminal on <em>this</em> machine:
+                <strong>Claude Code</strong> — connect it in one click:
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '4px 0 2px' }}>
+                  <button className="btn btn-primary btn-sm" disabled={connecting} onClick={connect}>
+                    {connecting ? 'Connecting…' : 'Connect Claude Code'}
+                  </button>
+                  {result && (
+                    <span style={{ fontSize: 12, color: result.ok ? 'var(--ok)' : 'var(--error)', whiteSpace: 'pre-wrap' }}>
+                      {result.message}
+                    </span>
+                  )}
+                </div>
+                <span className="dim" style={{ fontSize: 12 }}>Or run this once, in a terminal on <em>this</em> machine:</span>
                 <div className="code-row">
                   <code className="mono">{info.claudeCodeCommand}</code>
                   <button className="btn btn-sm" onClick={() => copy(info.claudeCodeCommand, 'Command')}>Copy</button>

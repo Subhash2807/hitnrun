@@ -11,7 +11,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { PROVIDERS, resolveLaunch, splitCommand } = require('../electron/chat-providers');
+const { PROVIDERS, resolveLaunch, splitCommand, parseHelpFlags } = require('../electron/chat-providers');
 const { ChatManager, shortToolName } = require('../electron/chat');
 
 let passed = 0;
@@ -119,6 +119,33 @@ test('claude: launches with only hitnrun tools and no permission prompts', () =>
   assert.deepEqual(line, { type: 'user', message: { role: 'user', content: 'hi' } });
 });
 
+test('claude: an older CLI gets only the options it knows, and still no built-in tools', () => {
+  const dir = fs.mkdtempSync(path.join(tmp, 'claude-old-'));
+  const { args } = PROVIDERS.claude.launch({
+    mcp: { command: 'node', args: ['server.js'], env: {} },
+    systemPrompt: 'be brief',
+    workDir: dir,
+    supports: () => false,
+  });
+  for (const flag of PROVIDERS.claude.optional) assert.ok(!args.includes(flag), `${flag} left out`);
+  const off = args.slice(args.indexOf('--disallowedTools') + 1, args.indexOf('--allowedTools'));
+  for (const tool of ['Bash', 'Write', 'Edit', 'Read']) assert.ok(off.includes(tool), `${tool} disabled`);
+  assert.equal(args[args.indexOf('--allowedTools') + 1], 'mcp__hitnrun');
+});
+
+test('help output is read into the set of long options', () => {
+  const flags = parseHelpFlags(
+    [
+      'Options:',
+      '  -p, --print                   Print response',
+      '  --allowedTools, --allowed-tools <tools...>',
+      '                                mentions --not-an-option in the text',
+      '  --tools <tools...>            Tools',
+    ].join('\n')
+  );
+  assert.deepEqual([...flags].sort(), ['--allowed-tools', '--allowedTools', '--print', '--tools']);
+});
+
 test('codex: events map to text, tools and turn end; MCP passed as TOML', () => {
   const events = feed(PROVIDERS.codex.parser(), [
     { type: 'thread.started', thread_id: 'th1' },
@@ -210,6 +237,15 @@ process.stdin.on('end', () => {
 `
 );
 
+// The same fake, but it refuses an option it doesn't know, like an older CLI.
+const OLD = path.join(tmp, 'old-cli.js');
+fs.writeFileSync(
+  OLD,
+  `if (process.argv.includes('--new-flag')) { process.stderr.write("error: unknown option '--new-flag'\\n"); process.exit(1); }
+require(${JSON.stringify(FAKE)});
+`
+);
+
 PROVIDERS.fake = {
   id: 'fake',
   label: 'Fake CLI',
@@ -287,6 +323,30 @@ test('manager: one reply at a time per chat, and empty messages are refused', as
   assert.equal(reply.status, 'stopped');
   assert.equal(reply.parts[0].status, 'done', 'a tool that had finished stays finished');
   m.shutdown();
+});
+
+test('manager: an option the CLI rejects is dropped and the message retried', async () => {
+  // Like an older Claude Code: help can't be read, and --new-flag is unknown.
+  PROVIDERS.oldfake = {
+    ...PROVIDERS.fake,
+    id: 'oldfake',
+    optional: ['--new-flag'],
+    launch: ({ prompt, supports }) => ({ file: process.execPath, args: [OLD, ...(supports('--new-flag') ? ['--new-flag'] : [])], stdin: prompt }),
+  };
+  const m = manager();
+  const chat = m.create();
+  m.configure(chat.id, { provider: 'oldfake' });
+  await m.send(chat.id, { text: 'hello old cli' });
+  const reply = await settle(chat);
+  assert.equal(reply.status, 'done', reply.error);
+  assert.match(reply.parts.find((p) => p.kind === 'text').text, /hello old cli/);
+
+  // The next start skips it straight away.
+  m.shutdown();
+  await m.send(chat.id, { text: 'second one' });
+  assert.equal((await settle(chat)).status, 'done');
+  m.shutdown();
+  delete PROVIDERS.oldfake;
 });
 
 test('manager: a crashed CLI becomes a readable error with a sign-in hint', async () => {
