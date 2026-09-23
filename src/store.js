@@ -259,7 +259,7 @@ export const useStore = create((set, get) => ({
 
   openTab(requestId) {
     const ui = get().state?.ui;
-    if (!ui) return;
+    if (!ui || typeof requestId !== 'string') return;
     const tabs = ui.tabs.includes(requestId) ? ui.tabs : [...ui.tabs, requestId];
     get().patchUi({ tabs, activeTabId: requestId });
   },

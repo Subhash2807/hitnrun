@@ -39,6 +39,20 @@ function defaultRequest(overrides = {}) {
   };
 }
 
+/**
+ * Open tabs must be a flat list of id strings. A malformed entry (a nested
+ * list, a null) used to crash the tab bar and leave the whole window blank, so
+ * bad entries are dropped on load and on every change rather than trusted.
+ */
+function normalizeUi(ui) {
+  const raw = Array.isArray(ui.tabs) ? ui.tabs : [];
+  ui.tabs = [...new Set(raw.filter((t) => typeof t === 'string' && t))];
+  if (typeof ui.activeTabId !== 'string' || !ui.tabs.includes(ui.activeTabId)) {
+    ui.activeTabId = ui.tabs.at(-1) ?? null;
+  }
+  return ui;
+}
+
 function defaultState() {
   const collectionId = uid('col');
   return {
@@ -82,7 +96,7 @@ class Workspace extends EventEmitter {
         const parsed = JSON.parse(fs.readFileSync(this.filePath, 'utf8'));
         this.state = { ...defaultState(), ...parsed };
         this.state.settings = { ...defaultState().settings, ...(parsed.settings || {}) };
-        this.state.ui = { ...defaultState().ui, ...(parsed.ui || {}) };
+        this.state.ui = normalizeUi({ ...defaultState().ui, ...(parsed.ui || {}) });
       }
     } catch (err) {
       // A corrupt workspace should never block startup — keep a backup and start clean.
@@ -428,6 +442,7 @@ class Workspace extends EventEmitter {
 
   patchUi(patch) {
     Object.assign(this.state.ui, patch);
+    normalizeUi(this.state.ui);
     this.touch('ui:update');
     return this.state.ui;
   }

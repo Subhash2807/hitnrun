@@ -64,6 +64,23 @@ const tmp = (label) => path.join(os.tmpdir(), `hitnrun-${label}-${Date.now()}-${
     assert.equal(ws.getState().ui.activeTabId, keep.id);
   });
 
+  await test('a malformed saved tab list is cleaned on load instead of blanking the window', () => {
+    const file = tmp('ws');
+    require('node:fs').writeFileSync(
+      file,
+      JSON.stringify({
+        collections: [],
+        ui: { tabs: [['req_a', 'req_b'], 'req_c', null, 'req_c', 42, 'req_d'], activeTabId: ['req_a'] },
+      })
+    );
+    const ws = new Workspace(file);
+    ws.load();
+    assert.deepEqual(ws.getState().ui.tabs, ['req_c', 'req_d']);
+    assert.equal(ws.getState().ui.activeTabId, 'req_d');
+    ws.patchUi({ tabs: ['req_c', ['x']], activeTabId: 'req_c' });
+    assert.deepEqual(ws.getState().ui.tabs, ['req_c']);
+  });
+
   await test('deleting an unknown folder is a no-op', () => {
     const ws = new Workspace(tmp('ws'));
     assert.equal(ws.deleteFolder('fld_nope'), false);
