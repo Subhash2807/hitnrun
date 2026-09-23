@@ -279,6 +279,9 @@ test('manager: one reply at a time per chat, and empty messages are refused', as
   await m.send(chat.id, { text: 'slow one' });
   await assert.rejects(m.send(chat.id, { text: 'again' }), /Wait for the reply/);
   assert.equal(m.list()[0].running, true);
+  // Let the fake report its tool call first, so the stop lands mid-reply.
+  const reply0 = chat.messages.at(-1);
+  for (let i = 0; i < 250 && !reply0.parts.some((p) => p.status === 'done'); i++) await new Promise((r) => setTimeout(r, 20));
   assert.equal(m.stop(chat.id), true);
   const reply = await settle(chat);
   assert.equal(reply.status, 'stopped');
