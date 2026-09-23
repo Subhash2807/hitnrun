@@ -6,6 +6,7 @@ import { html } from '@codemirror/lang-html';
 import { xml } from '@codemirror/lang-xml';
 import { vscodeDark, vscodeLight } from '@uiw/codemirror-theme-vscode';
 import { EditorView } from '@codemirror/view';
+import { jsonFolding } from '../lib/jsonFold.js';
 
 /**
  * Shared CodeMirror wrapper. Used for request bodies, scripts, and the
@@ -23,7 +24,7 @@ export default function Editor({
 }) {
   const extensions = useMemo(() => {
     const ext = [];
-    if (language === 'json') ext.push(json());
+    if (language === 'json') ext.push(json(), jsonFolding());
     else if (language === 'javascript') ext.push(javascript());
     else if (language === 'html') ext.push(html());
     else if (language === 'xml') ext.push(xml());

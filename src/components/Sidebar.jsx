@@ -5,7 +5,7 @@ import { SyncDot } from './SyncIndicator.jsx';
 import AiWorkspacePanel from './AiWorkspacePanel.jsx';
 import {
   IconSearch, IconPlus, IconMore, IconChevronDown, IconChevronRight,
-  IconFolder, IconLayers, IconClock, IconTrash, IconCopy, IconSync,
+  IconFolder, IconLayers, IconClock, IconTrash, IconCopy, IconSync, IconTerminal,
 } from './Icons.jsx';
 import { METHOD_COLORS, relativeTime, statusClass } from '../lib/format.js';
 
@@ -172,6 +172,7 @@ function FolderRow({ folder, depth, collapsed, toggle, matches }) {
   const call = useStore((s) => s.call);
   const createRequest = useStore((s) => s.createRequest);
   const syncContainer = useStore((s) => s.syncContainer);
+  const openModal = useStore((s) => s.openModal);
 
   return (
     <div>
@@ -192,9 +193,25 @@ function FolderRow({ folder, depth, collapsed, toggle, matches }) {
           >
             <Item onClick={() => createRequest(folder.id)}>Add Request</Item>
             <Item onClick={() => call('createFolder', folder.id, 'New Folder')}>Add Folder</Item>
+            <Item onClick={() => openModal({ type: 'renameFolder', id: folder.id, name: folder.name })}>Rename</Item>
             <Separator />
             <Item onClick={() => syncContainer(folder.id)} icon={<IconSync width={12} height={12} />}>
               Sync all with source cURL
+            </Item>
+            <Separator />
+            <Item
+              danger
+              icon={<IconTrash width={12} height={12} />}
+              onClick={() =>
+                openModal({
+                  type: 'confirm',
+                  title: 'Delete folder',
+                  message: `Delete "${folder.name}" and everything inside it? This cannot be undone.`,
+                  onConfirm: () => call('deleteFolder', folder.id),
+                })
+              }
+            >
+              Delete
             </Item>
           </Dropdown>
         </div>
@@ -233,6 +250,9 @@ function RequestRow({ request, depth, matches }) {
       <span className="tree-label">{request.name}</span>
       <SyncDot requestId={request.id} />
       <div className="row-actions" onClick={(e) => e.stopPropagation()}>
+        <button className="icon-btn" title="Copy as cURL" onClick={copyCurl}>
+          <IconTerminal width={13} height={13} />
+        </button>
         <Dropdown
           align="right"
           trigger={(open) => (
@@ -315,8 +335,15 @@ function EnvironmentsList() {
               >
                 <Item onClick={() => call('setActiveEnvironment', env.id)}>Set Active</Item>
                 <Item onClick={() => openModal({ type: 'environment', id: env.id })}>Edit</Item>
-                <Separator />
-                <Item danger onClick={() => call('deleteEnvironment', env.id)}>Delete</Item>
+                <Item onClick={() => openModal({ type: 'quickSource', envId: env.id })} icon={<IconSync width={12} height={12} />}>
+                  Set source cURL
+                </Item>
+                {!env.builtin && (
+                  <>
+                    <Separator />
+                    <Item danger onClick={() => call('deleteEnvironment', env.id)}>Delete</Item>
+                  </>
+                )}
               </Dropdown>
             </div>
           </div>

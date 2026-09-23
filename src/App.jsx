@@ -4,7 +4,7 @@ import Sidebar from './components/Sidebar.jsx';
 import RequestView from './components/RequestView.jsx';
 import Modals from './components/Modals.jsx';
 import Dropdown, { Item, Separator } from './components/Dropdown.jsx';
-import { IconPlus, IconClose, IconSettings, IconChevronDown } from './components/Icons.jsx';
+import { IconPlus, IconClose, IconSettings, IconChevronDown, IconSync } from './components/Icons.jsx';
 import { METHOD_COLORS } from './lib/format.js';
 
 export default function App() {
@@ -104,6 +104,18 @@ function TopBar() {
         <span className="dot" />
         {control.running ? `:${control.port}` : 'no agent port'}
       </span>
+
+      <button
+        className={`icon-btn ${activeEnv?.source ? 'source-set' : ''}`}
+        title={
+          activeEnv?.source
+            ? `Source cURL: ${activeEnv.source.origin} — click to replace`
+            : 'Set a source cURL'
+        }
+        onClick={() => openModal({ type: 'quickSource' })}
+      >
+        <IconSync />
+      </button>
 
       <Dropdown
         align="right"

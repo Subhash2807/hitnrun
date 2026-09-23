@@ -98,6 +98,20 @@ export const IconSync = make(
     <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
   </>
 );
+/** Response beside the request (vertical split). */
+export const IconSplitRight = make(
+  <>
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <line x1="12" y1="4" x2="12" y2="20" />
+  </>
+);
+/** Response below the request (horizontal split). */
+export const IconSplitBelow = make(
+  <>
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <line x1="3" y1="12" x2="21" y2="12" />
+  </>
+);
 export const IconWrap = make(
   <>
     <line x1="3" y1="6" x2="21" y2="6" />

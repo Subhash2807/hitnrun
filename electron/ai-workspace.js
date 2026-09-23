@@ -163,6 +163,21 @@ class AiWorkspace {
     return true;
   }
 
+  /** Remove every session and everything the AI created. */
+  discardAll() {
+    const state = this.getState();
+    state.sessions = [];
+    state.collections = [];
+    this.store.touch('ai:session-discard-all');
+    return true;
+  }
+
+  /** Delete one folder or request inside the AI workspace. */
+  deleteNode(id) {
+    if (this.store.findRequest(id)) return this.store.deleteRequest(id);
+    return this.store.deleteFolder(id);
+  }
+
   /* -------------------------------------------------------------- editing */
 
   /** Resolve a container id, refusing anything outside this workspace. */

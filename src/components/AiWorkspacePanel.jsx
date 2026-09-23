@@ -14,15 +14,40 @@ export default function AiWorkspacePanel() {
   const ai = useStore((s) => s.ai);
   const openModal = useStore((s) => s.openModal);
   const discardAiSession = useStore((s) => s.discardAiSession);
+  const discardAllAiSessions = useStore((s) => s.discardAllAiSessions);
   const [collapsed, setCollapsed] = useState({});
 
   const toggle = (id) => setCollapsed((c) => ({ ...c, [id]: !c[id] }));
   const sessions = ai?.sessions || [];
 
+  const confirmDiscard = (session, name) =>
+    openModal({
+      type: 'confirm',
+      title: 'Discard AI session',
+      message: `Delete "${name}" and everything the AI created in it? Your own requests are not affected.`,
+      onConfirm: () => discardAiSession(session.id),
+    });
+
   return (
     <>
       <div className="sidebar-toolbar">
         <span className="section-title grow" style={{ paddingLeft: 4 }}>AI Workspace</span>
+        {sessions.length > 0 && (
+          <button
+            className="icon-btn"
+            title="Discard all AI sessions"
+            onClick={() =>
+              openModal({
+                type: 'confirm',
+                title: 'Discard all AI sessions',
+                message: `Delete ${sessions.length === 1 ? 'the AI session' : `all ${sessions.length} AI sessions`} and everything in ${sessions.length === 1 ? 'it' : 'them'}? Your own requests are not affected.`,
+                onConfirm: discardAllAiSessions,
+              })
+            }
+          >
+            <IconTrash width={13} height={13} />
+          </button>
+        )}
         <button className="icon-btn" title="How to connect an AI" onClick={() => openModal({ type: 'aiSetup' })}>
           <IconPlus />
         </button>
@@ -61,6 +86,9 @@ export default function AiWorkspacePanel() {
                 <span className="tree-label" style={{ fontWeight: 500 }}>{collection.name}</span>
                 <span className="count-pill">{session.requestCount}</span>
                 <div className="row-actions" onClick={(e) => e.stopPropagation()}>
+                  <button className="icon-btn" title="Discard session" onClick={() => confirmDiscard(session, collection.name)}>
+                    <IconTrash width={12} height={12} />
+                  </button>
                   <Dropdown
                     align="right"
                     trigger={(open) => (
@@ -76,14 +104,7 @@ export default function AiWorkspacePanel() {
                     <Item
                       danger
                       icon={<IconTrash width={12} height={12} />}
-                      onClick={() =>
-                        openModal({
-                          type: 'confirm',
-                          title: 'Discard AI session',
-                          message: `Delete "${collection.name}" and everything the AI created in it? Your own requests are not affected.`,
-                          onConfirm: () => discardAiSession(session.id),
-                        })
-                      }
+                      onClick={() => confirmDiscard(session, collection.name)}
                     >
                       Discard session
                     </Item>
@@ -109,6 +130,26 @@ export default function AiWorkspacePanel() {
 
 function AiItems({ items, depth, collapsed, toggle }) {
   const openModal = useStore((s) => s.openModal);
+  const deleteAiNode = useStore((s) => s.deleteAiNode);
+
+  const remove = (item) => (
+    <button
+      className="icon-btn"
+      title={item.type === 'folder' ? 'Delete folder' : 'Delete request'}
+      onClick={() =>
+        item.type === 'folder'
+          ? openModal({
+              type: 'confirm',
+              title: 'Delete folder',
+              message: `Delete "${item.name}" and everything inside it from the AI workspace?`,
+              onConfirm: () => deleteAiNode(item.id),
+            })
+          : deleteAiNode(item.id)
+      }
+    >
+      <IconTrash width={12} height={12} />
+    </button>
+  );
 
   return (items || []).map((item) =>
     item.type === 'folder' ? (
@@ -127,6 +168,7 @@ function AiItems({ items, depth, collapsed, toggle }) {
             >
               Add
             </button>
+            {remove(item)}
           </div>
         </div>
         {!collapsed[item.id] && <AiItems items={item.items} depth={depth + 1} collapsed={collapsed} toggle={toggle} />}
@@ -143,6 +185,7 @@ function AiItems({ items, depth, collapsed, toggle }) {
           >
             Add
           </button>
+          {remove(item)}
         </div>
       </div>
     )

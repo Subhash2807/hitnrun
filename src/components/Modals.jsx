@@ -16,6 +16,8 @@ export default function Modals() {
       {modal.type === 'newCollection' && <TextPrompt title="New collection" label="Name" initial="New Collection" method="createCollection" />}
       {modal.type === 'renameCollection' && <RenameCollection id={modal.id} initial={modal.name} />}
       {modal.type === 'renameRequest' && <RenameRequest id={modal.id} initial={modal.name} />}
+      {modal.type === 'renameFolder' && <RenameFolder id={modal.id} initial={modal.name} />}
+      {modal.type === 'quickSource' && <QuickSourceModal envId={modal.envId} />}
       {modal.type === 'confirm' && <Confirm modal={modal} />}
       {modal.type === 'settings' && <SettingsModal />}
       {modal.type === 'promote' && <PromoteModal modal={modal} />}
@@ -107,15 +109,17 @@ function EnvironmentModal({ id }) {
                     >
                       {state.activeEnvironmentId === env.id ? 'Deactivate' : 'Set active'}
                     </button>
-                    <button
-                      className="btn btn-sm"
-                      onClick={async () => {
-                        await call('deleteEnvironment', env.id);
-                        setSelected(null);
-                      }}
-                    >
-                      Delete
-                    </button>
+                    {!env.builtin && (
+                      <button
+                        className="btn btn-sm"
+                        onClick={async () => {
+                          await call('deleteEnvironment', env.id);
+                          setSelected(null);
+                        }}
+                      >
+                        Delete
+                      </button>
+                    )}
                   </div>
                 </div>
                 <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
@@ -264,6 +268,96 @@ function SourceCurlPanel({ env }) {
   );
 }
 
+/**
+ * One-step source cURL: paste, save, done. Targets the given environment, else
+ * the active one, else the built-in Global — and activates it so the sync chips
+ * appear straight away.
+ */
+function QuickSourceModal({ envId }) {
+  const state = useStore((s) => s.state);
+  const call = useStore((s) => s.call);
+  const setSource = useStore((s) => s.setSource);
+  const closeModal = useStore((s) => s.closeModal);
+  const envs = state.environments;
+  const initial =
+    envs.find((e) => e.id === envId) ||
+    envs.find((e) => e.id === state.activeEnvironmentId) ||
+    envs.find((e) => e.builtin) ||
+    envs[0];
+  const [targetId, setTargetId] = useState(initial?.id);
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const target = envs.find((e) => e.id === targetId);
+
+  // Most of the time the cURL was just copied from DevTools — start with it.
+  useEffect(() => {
+    api.readClipboard().then((clip) => {
+      if (/^\s*curl(\.exe)?[\s\n]/i.test(clip || '')) setText((t) => t || clip);
+    });
+  }, []);
+
+  const save = async () => {
+    setBusy(true);
+    const result = await setSource(targetId, text);
+    if (result.ok && state.activeEnvironmentId !== targetId) await call('setActiveEnvironment', targetId);
+    setBusy(false);
+    if (result.ok) closeModal();
+  };
+
+  return (
+    <div className="modal" style={{ maxWidth: 620 }}>
+      <Head title="Source cURL" />
+      <div className="modal-body" style={{ padding: 16 }}>
+        <div className="row" style={{ gap: 8, marginBottom: 10, alignItems: 'center' }}>
+          <span className="section-title">Environment</span>
+          <select className="text-input" style={{ maxWidth: 220 }} value={targetId || ''} onChange={(e) => setTargetId(e.target.value)}>
+            {envs.map((e) => (
+              <option key={e.id} value={e.id}>
+                {e.name}
+              </option>
+            ))}
+          </select>
+          {target?.source && (
+            <span className="dim" style={{ fontSize: 12 }}>
+              current: {target.source.origin} · {target.source.headers.length} headers
+            </span>
+          )}
+        </div>
+        <textarea
+          className="source-textarea"
+          autoFocus
+          spellCheck={false}
+          value={text}
+          placeholder={"curl 'https://www.example.com/api/v2/search?q=x' \\\n  -H 'cookie: SID=…' \\\n  -H 'authorization: Bearer …'"}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && (e.ctrlKey || e.metaKey) && text.trim() && save()}
+        />
+        <div className="hint" style={{ padding: '8px 0 0' }}>
+          Copy a request from your browser's Network tab as cURL. Ctrl+Enter saves.
+        </div>
+      </div>
+      <div className="modal-foot">
+        {target?.source && (
+          <button
+            className="btn"
+            style={{ marginRight: 'auto', color: 'var(--error)' }}
+            onClick={async () => {
+              await setSource(targetId, '');
+              closeModal();
+            }}
+          >
+            Clear source
+          </button>
+        )}
+        <button className="btn" onClick={closeModal}>Cancel</button>
+        <button className="btn btn-primary" disabled={busy || !text.trim() || !targetId} onClick={save}>
+          {busy ? <span className="spinner" /> : 'Save'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function GlobalsModal() {
   const globals = useStore((s) => s.state.globals);
   const call = useStore((s) => s.call);
@@ -333,6 +427,19 @@ function RenameCollection({ id, initial }) {
   };
 
   return <SimpleRename title="Rename collection" value={value} setValue={setValue} submit={submit} close={closeModal} />;
+}
+
+function RenameFolder({ id, initial }) {
+  const call = useStore((s) => s.call);
+  const closeModal = useStore((s) => s.closeModal);
+  const [value, setValue] = useState(initial);
+
+  const submit = async () => {
+    if (value.trim()) await call('updateFolder', id, { name: value.trim() });
+    closeModal();
+  };
+
+  return <SimpleRename title="Rename folder" value={value} setValue={setValue} submit={submit} close={closeModal} />;
 }
 
 function RenameRequest({ id, initial }) {

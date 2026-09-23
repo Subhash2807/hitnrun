@@ -68,7 +68,6 @@ export default function SyncIndicator({ requestId }) {
     >
       {busy ? <span className="spinner" style={{ borderTopColor: 'var(--warn)' }} /> : <span className="sync-dot" />}
       Out of sync
-      <span className="sync-action">Sync</span>
     </button>
   );
 }

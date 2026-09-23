@@ -965,6 +965,24 @@ input[type='checkbox'] {
   overflow: hidden;
 }
 
+/* Response beside the request instead of below it. */
+.split-row {
+  flex-direction: row;
+}
+
+.split-row > .pane {
+  min-width: 0;
+}
+
+.split-row > .pane + .resizer + .pane {
+  border-left: 1px solid var(--border);
+}
+
+/* Top-bar source cURL button, lit when the active environment has one. */
+.icon-btn.source-set {
+  color: var(--accent);
+}
+
 .response-head {
   display: flex;
   align-items: center;
@@ -1370,13 +1388,6 @@ input[type='checkbox'] {
 .sync-drift:disabled {
   opacity: 0.6;
   cursor: default;
-}
-
-.sync-action {
-  font-weight: 600;
-  padding-left: 7px;
-  margin-left: 1px;
-  border-left: 1px solid rgba(230, 160, 32, 0.4);
 }
 
 /* Sidebar rows have no room for a chip — a bare dot carries the same signal. */

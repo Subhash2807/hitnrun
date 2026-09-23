@@ -7,7 +7,9 @@ import Editor from './Editor.jsx';
 import ResponsePanel from './ResponsePanel.jsx';
 import Dropdown, { Item, Separator } from './Dropdown.jsx';
 import SyncIndicator from './SyncIndicator.jsx';
-import { IconMore, IconCopy, IconTerminal, IconChevronDown, IconSync } from './Icons.jsx';
+import {
+  IconMore, IconCopy, IconTerminal, IconChevronDown, IconSync, IconSplitRight, IconSplitBelow,
+} from './Icons.jsx';
 import { METHODS, METHOD_COLORS } from '../lib/format.js';
 import { composeUrl, decomposeUrl, syncPathVars } from '../lib/url.js';
 
@@ -23,8 +25,15 @@ export default function RequestView({ requestId, theme }) {
   const result = useStore((s) => s.responses[requestId]);
   const sending = useStore((s) => s.sending[requestId]);
 
+  const patchUi = useStore((s) => s.patchUi);
+  // Response below (default) or beside the request; each layout remembers its own split.
+  const sideBySide = useStore((s) => s.state?.ui?.responseLayout === 'right');
+  const splitKey = sideBySide ? 'splitPctRight' : 'splitPctBelow';
+  const savedSplit = useStore((s) => s.state?.ui?.[splitKey]);
+
   const [tab, setTab] = useState('params');
-  const [splitPct, setSplitPct] = useState(48);
+  const [splitPct, setSplitPct] = useState(savedSplit ?? (sideBySide ? 50 : 48));
+  useEffect(() => setSplitPct(savedSplit ?? (sideBySide ? 50 : 48)), [sideBySide]);
   const [urlFocused, setUrlFocused] = useState(false);
   const [urlDraft, setUrlDraft] = useState('');
   const containerRef = useRef(null);
@@ -111,13 +120,18 @@ export default function RequestView({ requestId, theme }) {
   const startDrag = (e) => {
     e.preventDefault();
     const rect = containerRef.current.getBoundingClientRect();
+    let pct = splitPct;
     const onMove = (ev) => {
-      const pct = ((ev.clientY - rect.top) / rect.height) * 100;
-      setSplitPct(Math.min(85, Math.max(15, pct)));
+      const raw = sideBySide
+        ? ((ev.clientX - rect.left) / rect.width) * 100
+        : ((ev.clientY - rect.top) / rect.height) * 100;
+      pct = Math.min(85, Math.max(15, raw));
+      setSplitPct(pct);
     };
     const onUp = () => {
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
+      patchUi({ [splitKey]: Math.round(pct) });
     };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
@@ -144,6 +158,16 @@ export default function RequestView({ requestId, theme }) {
           <span className="breadcrumb">saved automatically</span>
           <div className="grow" />
           <SyncIndicator requestId={requestId} />
+          <button
+            className="icon-btn"
+            title={sideBySide ? 'Show response below' : 'Show response on the right'}
+            onClick={() => patchUi({ responseLayout: sideBySide ? 'below' : 'right' })}
+          >
+            {sideBySide ? <IconSplitBelow /> : <IconSplitRight />}
+          </button>
+          <button className="icon-btn" title="Copy as cURL" onClick={copyAsCurl}>
+            <IconTerminal />
+          </button>
           <Dropdown
             align="right"
             trigger={(open) => (
@@ -218,8 +242,8 @@ export default function RequestView({ requestId, theme }) {
         </div>
       </div>
 
-      <div className="split" ref={containerRef}>
-        <div className="pane" style={{ height: `${splitPct}%`, flex: 'none' }}>
+      <div className={`split ${sideBySide ? 'split-row' : ''}`} ref={containerRef}>
+        <div className="pane" style={{ [sideBySide ? 'width' : 'height']: `${splitPct}%`, flex: 'none' }}>
           <div className="panel-tabs">
             <PanelTab id="params" tab={tab} setTab={setTab} count={counts.params}>Params</PanelTab>
             <PanelTab id="auth" tab={tab} setTab={setTab} dot={hasAuth}>Authorization</PanelTab>
@@ -297,7 +321,7 @@ export default function RequestView({ requestId, theme }) {
           {tab === 'settings' && <RequestSettings request={request} onChange={(settings) => patchRequest(requestId, { settings })} />}
         </div>
 
-        <div className="resizer resizer-h" onMouseDown={startDrag} />
+        <div className={`resizer ${sideBySide ? '' : 'resizer-h'}`} onMouseDown={startDrag} />
 
         <div className="pane" style={{ flex: 1 }}>
           <ResponsePanel result={result} sending={sending} theme={theme} />

@@ -155,6 +155,13 @@ class ControlServer {
     /* ----------------------------------------------------------------- ai */
     if (root === 'ai') return this._routeAi(method, seg, url, body);
 
+    /* ---------------------------------------------------------------- ui */
+    // Only focuses a tab — nothing is written — so it sits outside the wall.
+    if (root === 'ui' && id === 'open' && method === 'POST') {
+      this.onEvent({ type: 'ui:open', requestId: body?.requestId, focus: true });
+      return { body: { opened: body?.requestId } };
+    }
+
     // Everything below touches the USER workspace. Reads are always fine;
     // writes need the wall lowered explicitly.
     if (['POST', 'PATCH', 'PUT', 'DELETE'].includes(method) && !this._userWritesAllowed()) {
@@ -407,12 +414,6 @@ class ControlServer {
       const result = this._sync(requests);
       this.onEvent({ type: 'request:updated' });
       return result.ok ? { body: result } : { status: 400, body: result };
-    }
-
-    /* ---------------------------------------------------------------- ui */
-    if (root === 'ui' && id === 'open' && method === 'POST') {
-      this.onEvent({ type: 'ui:open', requestId: body?.requestId, focus: true });
-      return { body: { opened: body?.requestId } };
     }
 
     return { status: 404, body: { error: `No route for ${method} /${seg.join('/')}` } };

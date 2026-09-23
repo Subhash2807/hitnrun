@@ -32,6 +32,8 @@ contextBridge.exposeInMainWorld('api', {
   aiGetState: () => ipcRenderer.invoke('ai:getState'),
   aiPromote: (nodeId, targetCollectionId) => ipcRenderer.invoke('ai:promote', nodeId, targetCollectionId),
   aiDiscardSession: (sessionId) => ipcRenderer.invoke('ai:discardSession', sessionId),
+  aiDiscardAll: () => ipcRenderer.invoke('ai:discardAll'),
+  aiDeleteNode: (nodeId) => ipcRenderer.invoke('ai:deleteNode', nodeId),
   aiSetPolicy: (policy) => ipcRenderer.invoke('ai:setPolicy', policy),
   aiSetupInfo: () => ipcRenderer.invoke('ai:setupInfo'),
   onAiChanged: (cb) => subscribe('ai:changed', cb),

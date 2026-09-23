@@ -194,6 +194,7 @@ app.whenReady().then(async () => {
 
   workspace = new Workspace(path.join(app.getPath('userData'), 'workspace.json'));
   workspace.load();
+  workspace.ensureDefaultEnvironment();
 
   // Separate file on purpose — the AI never holds a writable handle to the
   // user's requests, so isolation survives bugs in the AI code paths.
@@ -246,7 +247,7 @@ app.on('before-quit', () => {
 // Only these workspace methods are reachable from the renderer.
 const ALLOWED_WS_METHODS = new Set([
   'createCollection', 'updateCollection', 'deleteCollection',
-  'createFolder', 'createRequest', 'updateRequest', 'duplicateRequest',
+  'createFolder', 'updateFolder', 'deleteFolder', 'createRequest', 'updateRequest', 'duplicateRequest',
   'deleteRequest', 'moveRequest',
   'createEnvironment', 'updateEnvironment', 'deleteEnvironment',
   'setActiveEnvironment', 'setGlobals', 'setVariable',
@@ -417,6 +418,8 @@ function registerIpc() {
   });
 
   ipcMain.handle('ai:discardSession', (_e, sessionId) => aiWorkspace.discardSession(sessionId));
+  ipcMain.handle('ai:discardAll', () => aiWorkspace.discardAll());
+  ipcMain.handle('ai:deleteNode', (_e, nodeId) => aiWorkspace.deleteNode(nodeId));
 
   /**
    * Everything needed to point an MCP client at this app.

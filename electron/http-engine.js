@@ -13,6 +13,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { URL } = require('node:url');
+const { version } = require('../package.json');
 
 const MIME = {
   '.json': 'application/json',
@@ -190,7 +191,7 @@ function sendRequest(spec, { onProgress } = {}) {
     if (bodyBuf && !hasHeader(headers, 'content-length')) {
       headers.push(['Content-Length', String(bodyBuf.length)]);
     }
-    if (!hasHeader(headers, 'user-agent')) headers.push(['User-Agent', 'hitnrun/1.3.0']);
+    if (!hasHeader(headers, 'user-agent')) headers.push(['User-Agent', `hitnrun/${version}`]);
     if (!hasHeader(headers, 'accept')) headers.push(['Accept', '*/*']);
     if (!hasHeader(headers, 'accept-encoding')) headers.push(['Accept-Encoding', 'gzip, deflate, br']);
 

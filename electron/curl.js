@@ -293,7 +293,8 @@ function parseCurl(command) {
   }
 
   if (!url) return { ok: false, error: 'No URL found in the cURL command' };
-  if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(url)) url = 'https://' + url;
+  // A URL that starts with a variable ({{base_url}}/x) brings its own scheme.
+  if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(url) && !url.startsWith('{{')) url = 'https://' + url;
 
   // Split query string off the URL into the params grid.
   const params = [];

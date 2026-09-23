@@ -84,7 +84,13 @@ export const useStore = create((set, get) => ({
         get().openTab(event.requestId);
         get().showToast('Request created by agent');
       } else if (event.type === 'ui:open' && event.requestId) {
-        get().openTab(event.requestId);
+        if (findRequest(get().state, event.requestId)) {
+          get().openTab(event.requestId);
+        } else {
+          // The AI's own requests live in the AI tab, not in a request tab.
+          get().patchUi({ sidebarTab: 'ai' });
+          get().showToast('Claude wants you to look at something in the AI tab');
+        }
       } else if (event.type === 'request:updated') {
         get().showToast('Request updated by agent');
       } else if (event.type === 'request:result' && event.requestId) {
@@ -287,6 +293,17 @@ export const useStore = create((set, get) => ({
     await api.aiDiscardSession(sessionId);
     set({ ai: await api.aiGetState() });
     get().showToast('AI session discarded');
+  },
+
+  async discardAllAiSessions() {
+    await api.aiDiscardAll();
+    set({ ai: await api.aiGetState() });
+    get().showToast('All AI sessions discarded');
+  },
+
+  async deleteAiNode(nodeId) {
+    await api.aiDeleteNode(nodeId);
+    set({ ai: await api.aiGetState() });
   },
 
   /* -------------------------------------------------- source cURL syncing */

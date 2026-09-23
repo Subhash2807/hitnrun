@@ -139,6 +139,23 @@ const assert = require('node:assert');
     assert.ok(made.id.startsWith('req_'));
   });
 
+  await test('keeps working after the user discards its session in the app', async () => {
+    const before = JSON.parse((await send('tools/call', { name: 'app_status', arguments: {} })).result.content[0].text);
+    const old = before.yourSession.sessionId;
+    const del = await fetch(`http://127.0.0.1:${PORT}/ai/sessions/${old}`, { method: 'DELETE' });
+    assert.equal(del.status, 200);
+
+    // A write goes through on a fresh session instead of failing.
+    const res = await send('tools/call', { name: 'create_folder', arguments: { name: 'after discard' } });
+    assert.ok(!res.result.isError, res.result.content?.[0]?.text);
+
+    // And app_status reports the new session, not the dead one.
+    const after = JSON.parse((await send('tools/call', { name: 'app_status', arguments: {} })).result.content[0].text);
+    assert.notEqual(after.yourSession.sessionId, old);
+    const sessions = await (await fetch(`http://127.0.0.1:${PORT}/ai/sessions`)).json();
+    assert.ok(sessions.some((s) => s.id === after.yourSession.sessionId));
+  });
+
   await test('a blocked method comes back as a clear tool error', async () => {
     const res = await send('tools/call', {
       name: 'send_adhoc',

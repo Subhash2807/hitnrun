@@ -200,6 +200,31 @@ class Workspace extends EventEmitter {
     return folder;
   }
 
+  findFolder(id) {
+    for (const hit of this.walk()) {
+      if (hit.folder && hit.folder.id === id) return hit;
+    }
+    return null;
+  }
+
+  updateFolder(id, patch) {
+    const hit = this.findFolder(id);
+    if (!hit) return null;
+    if (typeof patch?.name === 'string' && patch.name.trim()) hit.folder.name = patch.name.trim();
+    this.touch('folder:update', id);
+    return hit.folder;
+  }
+
+  /** Delete a folder and everything inside it. */
+  deleteFolder(id) {
+    const hit = this.findFolder(id);
+    if (!hit) return false;
+    hit.parent.items.splice(hit.parent.items.indexOf(hit.folder), 1);
+    this._closeTabsFor(hit.folder);
+    this.touch('folder:delete', id);
+    return true;
+  }
+
   createRequest(containerId, fields = {}) {
     let container = this.findContainer(containerId);
     if (!container) {
@@ -283,11 +308,25 @@ class Workspace extends EventEmitter {
 
   deleteEnvironment(id) {
     const idx = this.state.environments.findIndex((e) => e.id === id);
-    if (idx === -1) return false;
+    if (idx === -1 || this.state.environments[idx].builtin) return false;
     this.state.environments.splice(idx, 1);
     if (this.state.activeEnvironmentId === id) this.state.activeEnvironmentId = null;
     this.touch('environment:delete', id);
     return true;
+  }
+
+  /**
+   * Every user workspace has a built-in "Global" environment, so a source cURL
+   * or a variable always has somewhere to live without creating one first. It
+   * is activated only when it is first created — deactivating it later sticks.
+   */
+  ensureDefaultEnvironment() {
+    if (this.state.environments.some((e) => e.builtin)) return null;
+    const env = { id: uid('env'), name: 'Global', values: [], builtin: true };
+    this.state.environments.unshift(env);
+    if (!this.state.activeEnvironmentId) this.state.activeEnvironmentId = env.id;
+    this.touch('environment:create', env.id);
+    return env;
   }
 
   /* ------------------------------------------------------- source cURL */

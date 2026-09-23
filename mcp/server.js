@@ -85,6 +85,27 @@ async function ensureSession() {
   return session;
 }
 
+/**
+ * Run a call that needs the session. The user can discard a session from the
+ * app while this server is still connected; start a fresh one and retry once.
+ */
+async function withSession(fn) {
+  try {
+    return await fn(await ensureSession());
+  } catch (err) {
+    if (!/Unknown AI session/.test(err.message)) throw err;
+    session = null;
+    return fn(await ensureSession());
+  }
+}
+
+/** Drop the cached session if the user has discarded it in the app. */
+async function checkSession() {
+  if (!session) return;
+  const sessions = await callApp('GET', '/ai/sessions');
+  if (!sessions.some((s) => s.id === session.sessionId)) session = null;
+}
+
 const ok = (value) => ({
   content: [{ type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }],
 });
@@ -112,6 +133,7 @@ server.registerTool(
   },
   guard(async () => {
     const health = await callApp('GET', '/health');
+    await checkSession();
     const mine = await ensureSession();
     const policy = await callApp('GET', '/ai/policy');
     return {
@@ -172,10 +194,9 @@ server.registerTool(
       source_id: z.string().describe("A request, folder or collection id from the user's workspace"),
     },
   },
-  guard(async ({ source_id }) => {
-    const mine = await ensureSession();
-    return callApp('POST', '/ai/copy', { sessionId: mine.sessionId, sourceId: source_id });
-  })
+  guard(({ source_id }) =>
+    withSession((mine) => callApp('POST', '/ai/copy', { sessionId: mine.sessionId, sourceId: source_id }))
+  )
 );
 
 /* ==================================================== your own workspace */
@@ -207,10 +228,9 @@ server.registerTool(
       body: z.record(z.any()).optional().describe('e.g. { mode: "raw", rawType: "json", raw: "{}" }'),
     },
   },
-  guard(async (args) => {
-    const mine = await ensureSession();
-    return callApp('POST', '/ai/requests', { sessionId: mine.sessionId, ...toApi(args) });
-  })
+  guard((args) =>
+    withSession((mine) => callApp('POST', '/ai/requests', { sessionId: mine.sessionId, ...toApi(args) }))
+  )
 );
 
 server.registerTool(
@@ -256,10 +276,9 @@ server.registerTool(
     description: 'Group your requests into a folder inside your AI session workspace.',
     inputSchema: { name: z.string(), folder_id: z.string().optional().describe('Parent folder') },
   },
-  guard(async ({ name, folder_id }) => {
-    const mine = await ensureSession();
-    return callApp('POST', '/ai/folders', { sessionId: mine.sessionId, name, folderId: folder_id });
-  })
+  guard(({ name, folder_id }) =>
+    withSession((mine) => callApp('POST', '/ai/folders', { sessionId: mine.sessionId, name, folderId: folder_id }))
+  )
 );
 
 /* ============================================================= execution */

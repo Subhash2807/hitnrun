@@ -45,7 +45,7 @@ git tag v1.3.1 && git push origin v1.3.1
 npm install
 npm run dev      # hot-reloading development window
 npm start        # build once, then run the app
-npm test         # 97 headless tests of the engine, parser, sandbox and agent API
+npm test         # 114 headless tests of the engine, parser, sandbox and agent API
 ```
 
 ### Building installers
@@ -140,7 +140,7 @@ right places. Works with `\` (Unix) and `^` (Windows) line continuations,
 `$'...'` quoting, `-F`, `-d`, `--data-urlencode`, `-G`, `-u`, and more.
 `Ctrl/Cmd+Shift+V` imports from the clipboard directly.
 
-**Copy as cURL** on any request (`Ctrl/Cmd+Shift+C`) regenerates the command,
+**Copy as cURL** on any request (the `>_` icon, or `Ctrl/Cmd+Shift+C`) regenerates the command,
 with `{{variables}}` resolved.
 
 **Duplicate** any request from the sidebar, the ⋯ menu, or `Ctrl/Cmd+D`.
@@ -154,6 +154,10 @@ Content-Type:application/json
 Authorization:Bearer {{token}}
 //X-Debug:1                      <- the // prefix disables a row
 ```
+
+**Environments** — every workspace has a built-in **Global** environment, active
+from the start, so a variable or a source cURL always has somewhere to go. It
+cannot be deleted; add more environments for staging, production and so on.
 
 **Variables** — `{{name}}` anywhere, resolved from the active environment, then
 collection variables, then globals. Dynamic values like `{{$guid}}`,
@@ -177,9 +181,11 @@ The daily problem this solves: you copy a request out of your browser's Network
 tab, and a few hours later its cookies and tokens expire. Re-pasting headers
 into twenty requests by hand is the worst part of API testing.
 
-Instead, give an **environment** a single **source cURL**
-(Environments → pick one → *Source cURL* → paste). Every request then shows a
-chip telling you whether it still matches:
+Instead, give an **environment** a single **source cURL**: click the sync icon
+in the top bar, next to the environment picker. It opens with whatever cURL is
+on your clipboard, saves to the active environment (Global by default) and
+activates it. The icon turns blue once a source is set. Every request then
+shows a chip telling you whether it still matches:
 
 | | |
 |---|---|
@@ -211,12 +217,19 @@ only its headers sync — the URL is untouched.
 Because scope is explicit, the origin rewrite is unconditional within it: group
 requests per service in folders and sync the folder you mean.
 
-To refresh everything after a new login: paste the new cURL onto the
-environment, then ⋯ → *Sync all* on the collection.
+To refresh everything after a new login: copy the new cURL, click the top-bar
+sync icon, save, then ⋯ → *Sync all* on the collection.
 
 **Response** — pretty / raw / preview views, headers, parsed cookies, test
 results, and the script console. Timing and size on every send. Redirects are
-followed manually so each hop is recorded.
+followed manually so each hop is recorded. Folding a JSON object or array shows
+how much it hides — `"users": [ 3 items ]`, `"address": { 5 keys }`.
+
+**Layout** — the split icon beside the sync chip puts the response below the
+request or beside it. Drag the divider to resize; both the layout and the split
+are remembered.
+
+**Folders** can be renamed and deleted from their ⋯ menu.
 
 ### Keyboard
 
@@ -284,6 +297,9 @@ client and start time. (Settings can switch this to one shared folder.)
 **Add** on it and choose which collection it joins. There is no API route for
 promotion at all — it exists only in the UI, so an agent cannot promote itself.
 Discarding a session deletes everything it made and touches nothing of yours.
+Use the trash icon on a session, on any single AI request or folder, or at the
+top of the AI tab to discard every session at once. A connected assistant just
+starts a fresh session on its next call.
 
 ### Guardrails
 
