@@ -219,7 +219,9 @@ function userWorkspace(base) {
       ['Cookie', 'sid=1; theme=dark'],
       ['X-Api-Key', 'short'],
       ['Content-Type', 'application/json'],
+      ['Access-Control-Allow-Credentials', 'true'],
     ]);
+    assert.equal(headers[4][1], 'true', 'CORS headers are not secrets');
     assert.equal(headers[0][1], 'Bearer ••••••1a2f');
     assert.equal(headers[1][1], 'sid=••••••; theme=••••••');
     assert.equal(headers[2][1], '••••••');

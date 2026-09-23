@@ -52,6 +52,8 @@ function maskHeaders(pairs) {
   return (pairs || []).map(([k, v]) => {
     const lower = String(k).toLowerCase();
     if (lower === 'cookie' || lower === 'set-cookie') return [k, maskCookie(v)];
+    // CORS headers name things like "credentials" but never carry a secret.
+    if (lower.startsWith('access-control-')) return [k, v];
     if (SECRET_HEADERS.has(lower) || SECRET_NAME.test(lower)) return [k, maskValue(v)];
     return [k, v];
   });
