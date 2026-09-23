@@ -34,7 +34,7 @@ Installers are built by GitHub Actions (`.github/workflows/release.yml`) wheneve
 a version tag is pushed:
 
 ```bash
-git tag v1.4.0 && git push origin v1.4.0
+git tag v1.5.0 && git push origin v1.5.0
 ```
 
 ---
@@ -51,9 +51,9 @@ npm test         # 128 headless tests of the engine, parser, sandbox and agent A
 ### Building installers
 
 ```bash
-npm run dist:win     # -> release/hitnrun-Setup-1.4.0.exe
-npm run dist:mac     # -> release/hitnrun-1.4.0-arm64.dmg   (must be run on a Mac)
-npm run dist:linux   # -> release/hitnrun-1.4.0.AppImage
+npm run dist:win     # -> release/hitnrun-Setup-1.5.0.exe
+npm run dist:mac     # -> release/hitnrun-1.5.0-arm64.dmg   (must be run on a Mac)
+npm run dist:linux   # -> release/hitnrun-1.5.0.AppImage
 ```
 
 The app icon is `build/icon.png`, rendered by `npm run icon` (a sky-blue disc with
