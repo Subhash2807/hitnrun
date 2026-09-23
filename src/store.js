@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { composeUrl } from './lib/url.js';
 
 /**
  * Renderer-side store.
@@ -59,6 +60,13 @@ export const useStore = create((set, get) => ({
   docVersions: {},
   // requestId -> true once the response on screen has been added to the doc.
   addedToDoc: {},
+  // In-app AI chat (beta). Chats live in the main process; this mirrors the
+  // list and the open conversation.
+  chats: [],
+  chat: null,
+  chatProviders: [],
+  chatDetected: null,
+  chatDraft: '',
   toast: null,
   modal: null,
 
@@ -125,6 +133,16 @@ export const useStore = create((set, get) => ({
         set((s) => ({ responses: { ...s.responses, [event.requestId]: event.result } }));
       }
     });
+
+    api.chatList().then((chats) => set({ chats }));
+    api.chatProviders().then((chatProviders) => set({ chatProviders }));
+    api.onChatList((chats) => set({ chats }));
+    api.onChatChanged((chat) => {
+      if (get().chat?.id === chat.id) set({ chat });
+    });
+    const openChatId = state.ui?.chatId;
+    if (openChatId) api.chatGet(openChatId).then((chat) => chat && set({ chat }));
+    if (state.ui?.chatOpen) get().detectChatProviders();
 
     api.onRequestProgress((p) => {
       set((s) => ({ progress: { ...s.progress, [p.requestId]: p } }));
@@ -444,6 +462,152 @@ export const useStore = create((set, get) => ({
     return out;
   },
 
+  /* ------------------------------------------------------ AI chat (beta) */
+
+  /** Open or close the chat panel. `prompt` prefills the input; `send` sends it straight away. */
+  async toggleChat(open, { prompt, send = false } = {}) {
+    const next = open ?? !get().state?.ui?.chatOpen;
+    get().patchUi({ chatOpen: next });
+    if (!next) return;
+    if (!get().chatDetected) get().detectChatProviders();
+    if (!get().chat) {
+      const id = get().state.ui.chatId;
+      const existing = id && (await api.chatGet(id));
+      if (existing) set({ chat: existing });
+    }
+    if (prompt != null) {
+      if (send) {
+        // An "Ask" button starts a fresh chat unless the open one is still empty.
+        if (!get().chat || get().chat.messages.length) await get().newChat();
+        await get().sendChat(prompt);
+      } else {
+        set({ chatDraft: prompt });
+      }
+    }
+  },
+
+  async detectChatProviders(force = false) {
+    set({ chatDetected: await api.chatDetect(force) });
+  },
+
+  async newChat(options = {}) {
+    const chat = await api.chatCreate(options);
+    set({ chat });
+    get().patchUi({ chatId: chat.id, chatView: 'chat' });
+    return chat;
+  },
+
+  async openChat(id) {
+    const chat = await api.chatGet(id);
+    if (!chat) return;
+    set({ chat });
+    get().patchUi({ chatId: id, chatView: 'chat' });
+  },
+
+  async deleteChat(id) {
+    await api.chatRemove(id);
+    if (get().chat?.id === id) {
+      set({ chat: null });
+      get().patchUi({ chatId: null });
+    }
+  },
+
+  /** Switch CLI or model. The choice also becomes the default for new chats. */
+  async configureChat(options) {
+    const chat = get().chat;
+    const defaults = get().chatDefaults();
+    if (!chat || chat.messages.length === 0) {
+      const provider = options.provider || chat?.provider || defaults.provider;
+      const patch = { provider };
+      if (options.model != null) patch.models = { [provider]: options.model };
+      await get().saveChatSettings(patch);
+    }
+    if (!chat) return;
+    const out = await api.chatConfigure(chat.id, options);
+    if (!out.ok) return get().showToast(out.error);
+    set({ chat: out.chat });
+    if (chat.messages.length) {
+      await get().saveChatSettings({ provider: out.chat.provider, models: { [out.chat.provider]: out.chat.model } });
+    }
+  },
+
+  chatDefaults() {
+    const settings = get().state?.settings?.chat || {};
+    const provider = settings.provider || 'claude';
+    return { provider, model: settings.models?.[provider] || '', customCommand: settings.customCommand || '' };
+  },
+
+  async saveChatSettings(patch) {
+    await api.chatSettings(patch);
+    await get().refresh();
+    if ('customCommand' in patch) get().detectChatProviders(true);
+  },
+
+  /** Describe what is open in the app, so "why is this failing?" needs no pasting. */
+  chatContext() {
+    const { state, responses } = get();
+    const active = state?.ui?.activeTabId;
+    if (!active) return null;
+    const env = state.environments.find((e) => e.id === state.activeEnvironmentId);
+    const lines = [];
+    let label = null;
+    if (active.startsWith('doc_')) {
+      const doc = get().docs.find((d) => d.id === active);
+      if (!doc) return null;
+      label = doc.name;
+      lines.push(`Open test doc: "${doc.name}" (id ${doc.id}). Read it with get_doc.`);
+    } else {
+      const request = get().getRequest(active);
+      const hit = findRequest(state, active);
+      if (!request) return null;
+      label = request.name;
+      lines.push(`Open request: "${request.name}" (id ${request.id})${hit ? ` in collection "${hit.collection.name}"` : ''}`);
+      // Query params live in their own grid; put them back the way the URL bar shows them.
+      const shown = composeUrl(request.url, request.params || []);
+      lines.push(`${request.method} ${shown}`);
+      if (request.body?.mode === 'raw' && request.body.raw?.trim()) {
+        lines.push(`Request body (${request.body.rawType || 'text'}):
+${request.body.raw.slice(0, 2000)}`);
+      } else if (request.body?.mode && request.body.mode !== 'none') {
+        lines.push(`Request body: ${request.body.mode}`);
+      }
+      const result = responses[active];
+      const sent = result?.request?.fullUrl || result?.request?.url;
+      if (sent && sent !== shown) lines.push(`URL actually sent (variables filled in): ${sent}`);
+      const failure = result?.error || result?.response?.error;
+      if (failure) {
+        lines.push(`Last send failed: ${failure.message}${failure.code ? ` (${failure.code})` : ''}`);
+      } else if (result?.response) {
+        const r = result.response;
+        lines.push(`Last response: ${r.status} ${r.statusText || ''} in ${Math.round(r.timeMs ?? 0)} ms`);
+        const body = decodeBody(r.bodyBase64);
+        if (body) lines.push(`Response body${body.length > 3000 ? ' (first 3000 characters)' : ''}:\n${body.slice(0, 3000)}`);
+        const tests = result.tests || [];
+        if (tests.length) lines.push(`Tests: ${tests.filter((t) => t.passed).length}/${tests.length} passed`);
+      }
+    }
+    if (env) lines.push(`Active environment: ${env.name}`);
+    return { label, text: `<hitnrun-context>\n${lines.join('\n')}\n</hitnrun-context>` };
+  },
+
+  async sendChat(text, { includeContext = true } = {}) {
+    let chat = get().chat;
+    if (!chat) chat = await get().newChat();
+    const context = includeContext ? get().chatContext() : null;
+    const out = await api.chatSend(chat.id, { text, context: context?.text, contextLabel: context?.label });
+    if (!out.ok) {
+      get().showToast(out.error || 'Could not send that');
+      return out;
+    }
+    set({ chatDraft: '' });
+    return out;
+  },
+
+  async stopChat() {
+    const chat = get().chat;
+    if (chat) await api.chatStop(chat.id);
+  },
+
   /* ------------------------------------------------------ collections etc. */
 
   async refresh() {
@@ -456,5 +620,16 @@ export const useStore = create((set, get) => ({
     return result;
   },
 }));
+
+/** A base64 response body as text; binary bodies come back empty. */
+function decodeBody(b64) {
+  if (!b64) return '';
+  try {
+    const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    return '';
+  }
+}
 
 export { api };

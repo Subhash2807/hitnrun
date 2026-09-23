@@ -3,6 +3,7 @@ import Editor from './Editor.jsx';
 import { IconCopy, IconDownload } from './Icons.jsx';
 import { api, useStore } from '../store.js';
 import { AddToDocButton } from './DocsPanel.jsx';
+import { AskAiButton } from './ChatPanel.jsx';
 import {
   prettyBytes,
   prettyTime,
@@ -75,6 +76,7 @@ export default function ResponsePanel({ requestId, result, sending, theme }) {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <strong className="grow">{result.phase === 'pre-request' ? 'Pre-request script failed' : 'Could not send request'}</strong>
             {/* A failure can be worth documenting too. */}
+            <AskAiButton label='Ask AI why' prompt='Why did the open request fail, and how do I fix it?' />
             {result.phase !== 'pre-request' && <AddToDocButton requestId={requestId} />}
           </div>
           <div style={{ marginTop: 6 }}>{failure.message}</div>
@@ -117,6 +119,7 @@ export default function ResponsePanel({ requestId, result, sending, theme }) {
         <span className="stat">
           Size <b>{prettyBytes(response.size?.decoded)}</b>
         </span>
+        <AskAiButton label='Explain' prompt='Explain the last response of the open request, and point out anything unusual.' />
         <AddToDocButton requestId={requestId} />
         <button className="icon-btn" title="Copy response body" onClick={copyBody}>
           <IconCopy />

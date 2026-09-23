@@ -51,6 +51,21 @@ contextBridge.exposeInMainWorld('api', {
   generateCode: (request, options) => ipcRenderer.invoke('code:generate', request, options),
   importPostman: () => ipcRenderer.invoke('collection:importPostman'),
 
+  /* AI chat (beta) ------------------------------------------------------- */
+  chatProviders: () => ipcRenderer.invoke('chat:providers'),
+  chatDetect: (force) => ipcRenderer.invoke('chat:detect', force),
+  chatList: () => ipcRenderer.invoke('chat:list'),
+  chatGet: (id) => ipcRenderer.invoke('chat:get', id),
+  chatCreate: (options) => ipcRenderer.invoke('chat:create', options),
+  chatRename: (id, title) => ipcRenderer.invoke('chat:rename', id, title),
+  chatRemove: (id) => ipcRenderer.invoke('chat:remove', id),
+  chatStop: (id) => ipcRenderer.invoke('chat:stop', id),
+  chatConfigure: (id, options) => ipcRenderer.invoke('chat:configure', id, options),
+  chatSend: (id, message) => ipcRenderer.invoke('chat:send', id, message),
+  chatSettings: (patch) => ipcRenderer.invoke('chat:settings', patch),
+  onChatChanged: (cb) => subscribe('chat:changed', cb),
+  onChatList: (cb) => subscribe('chat:list', cb),
+
   /* system --------------------------------------------------------------- */
   pickFile: (options) => ipcRenderer.invoke('dialog:pickFile', options),
   saveFile: (options) => ipcRenderer.invoke('dialog:saveFile', options),

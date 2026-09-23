@@ -12,6 +12,10 @@ no team features, no telemetry.
 Grab the installer for your machine from the
 [latest release](https://github.com/Subhash2807/hitnrun/releases/latest):
 
+Beta builds (such as `1.6.0-beta.1`) are published as **pre-releases**, so they
+don't show up as "latest". Find them on the
+[releases page](https://github.com/Subhash2807/hitnrun/releases).
+
 | Platform | File |
 |---|---|
 | Windows 10/11 (x64) | `hitnrun-Setup-<version>.exe` |
@@ -31,10 +35,11 @@ Both builds are **unsigned**, so the OS will warn you the first time:
   See [Building a real .dmg](#building-a-real-dmg) if it still refuses to open.
 
 Installers are built by GitHub Actions (`.github/workflows/release.yml`) whenever
-a version tag is pushed:
+a version tag is pushed. A tag with a hyphen (`v1.6.0-beta.1`) becomes a
+pre-release:
 
 ```bash
-git tag v1.5.0 && git push origin v1.5.0
+git tag v1.6.0-beta.1 && git push origin v1.6.0-beta.1
 ```
 
 ---
@@ -45,15 +50,15 @@ git tag v1.5.0 && git push origin v1.5.0
 npm install
 npm run dev      # hot-reloading development window
 npm start        # build once, then run the app
-npm test         # 128 headless tests of the engine, parser, sandbox and agent API
+npm test         # 142 headless tests of the engine, parser, sandbox and agent API
 ```
 
 ### Building installers
 
 ```bash
-npm run dist:win     # -> release/hitnrun-Setup-1.5.0.exe
-npm run dist:mac     # -> release/hitnrun-1.5.0-arm64.dmg   (must be run on a Mac)
-npm run dist:linux   # -> release/hitnrun-1.5.0.AppImage
+npm run dist:win     # -> release/hitnrun-Setup-1.6.0-beta.1.exe
+npm run dist:mac     # -> release/hitnrun-1.6.0-beta.1-arm64.dmg   (must be run on a Mac)
+npm run dist:linux   # -> release/hitnrun-1.6.0-beta.1.AppImage
 ```
 
 The app icon is `build/icon.png`, rendered by `npm run icon` (a sky-blue disc with
@@ -276,6 +281,48 @@ something to hand over instead of trying to remember what you clicked.
 | `Ctrl/Cmd + Shift + V` | Import cURL from clipboard |
 | `Ctrl/Cmd + W` | Close tab |
 | `Ctrl/Cmd + =` / `-` / `0` | Zoom in / out / reset (remembered) |
+| `Ctrl/Cmd + L` | Open / close the AI assistant |
+
+---
+
+## AI assistant in the app (beta)
+
+**Ask AI** in the top bar (or `Ctrl/Cmd + L`) opens a chat panel on the right.
+It doesn't call a model API itself: it runs an AI command-line tool that is
+already installed and signed in on your computer, and connects it to the app
+through hitnrun's MCP server. You use your own login and plan, and there are no
+API keys to paste.
+
+| CLI | Status | Install |
+|---|---|---|
+| Claude Code | Supported (the default) | `npm install -g @anthropic-ai/claude-code` |
+| Codex CLI | Experimental | `npm install -g @openai/codex` |
+| Gemini CLI | Experimental | `npm install -g @google/gemini-cli` |
+| Custom command | Experimental | any CLI that takes a prompt; put `{prompt}` where the message goes |
+
+What it does:
+
+- **Knows what you're looking at.** Each message carries the open request (URL
+  with its query params, and the body), its last response and the active
+  environment. The chip above the input shows this; click it to leave it out.
+- **Uses the app's tools.** It can read your collections, environments and test
+  docs, and send requests. Each tool call shows as a collapsible line with its
+  input and output.
+- **Ask AI shortcuts.** **Explain** on a response and **Ask AI why** on a failed
+  send start a new chat with that question.
+- Replies stream in and render as Markdown. **Stop** interrupts a reply. Chats
+  are saved (`chats.json`) and listed under the clock icon.
+
+It is sandboxed the same way as any other agent (see below): it writes only to
+its own AI workspace, your guardrails apply, and blocked sends are refused.
+Claude Code runs with **no built-in tools**, so it has no shell or file access,
+only hitnrun's tools. Codex runs with its read-only sandbox, and Gemini with its
+shell and file-writing tools turned off. The panel needs the agent control
+server (Settings) to be on.
+
+Known limits of the beta: Codex, Gemini and the custom command haven't been
+tested against a live install yet. A custom command only gets hitnrun's tools if
+you register hitnrun's MCP server in that tool yourself.
 
 ---
 
@@ -480,6 +527,8 @@ electron/
   doc-export.js      Markdown / HTML / Postman export, secret masking
   codegen.js         cURL / fetch / Python snippets for the Code panel
   postman.js         Postman collection import
+  chat.js            the in-app AI chat: runs a CLI, keeps chats.json
+  chat-providers.js  per-CLI adapters (Claude Code, Codex, Gemini, custom)
   preload.js         the only renderer <-> Node bridge
 src/                 React UI (Vite)
 test/*.js            headless tests for all of the above
@@ -497,8 +546,8 @@ Your data lives in one folder:
 - Windows — `%APPDATA%\hitnrun\`
 - macOS — `~/Library/Application Support/hitnrun/`
 
-`workspace.json` holds your requests, `docs.json` your test docs and
-`ai-workspace.json` the AI sessions. Back them up by copying those files.
+`workspace.json` holds your requests, `docs.json` your test docs,
+`chats.json` your AI chats and `ai-workspace.json` the AI sessions. Back them up by copying those files.
 
 ---
 

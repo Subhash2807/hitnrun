@@ -63,3 +63,5 @@ jobs:
         with:
           files: out/*
           generate_release_notes: true
+          # v1.6.0-beta.1 and the like are published as pre-releases.
+          prerelease: ${{ contains(github.ref_name, '-') }}

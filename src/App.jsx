@@ -5,6 +5,7 @@ import RequestView from './components/RequestView.jsx';
 import Modals from './components/Modals.jsx';
 import DocView from './components/DocView.jsx';
 import { RecordControl } from './components/DocsPanel.jsx';
+import ChatPanel, { ChatToggle } from './components/ChatPanel.jsx';
 import Dropdown, { Item, Separator } from './components/Dropdown.jsx';
 import { IconPlus, IconClose, IconSettings, IconChevronDown, IconSync, IconDoc } from './components/Icons.jsx';
 import { METHOD_COLORS } from './lib/format.js';
@@ -36,6 +37,7 @@ export default function App() {
       if (command === 'request:new') createRequest(useStore.getState().state?.collections?.[0]?.id);
       else if (command === 'collection:new') openModal({ type: 'newCollection' });
       else if (command === 'collection:import') useStore.getState().importPostman();
+      else if (command === 'chat:toggle') useStore.getState().toggleChat();
       else if (command === 'tab:close' && active) closeTab(active);
       else if (command === 'tab:next') cycleTab(1);
       else if (command === 'tab:prev') cycleTab(-1);
@@ -69,6 +71,7 @@ export default function App() {
             <EmptyState />
           )}
         </div>
+        {state.ui.chatOpen && <ChatPanel />}
       </div>
       <Modals />
       {toast && <div className="toast">{toast.message}</div>}
@@ -97,6 +100,8 @@ function TopBar() {
       <div className="topbar-spacer" />
 
       <RecordControl />
+
+      <ChatToggle />
 
       <span
         className={`badge ${control.running ? 'live' : ''}`}

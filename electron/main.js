@@ -15,6 +15,8 @@ const { DocStore } = require('./docs');
 const docExport = require('./doc-export');
 const { importPostman } = require('./postman');
 const codegen = require('./codegen');
+const { ChatManager } = require('./chat');
+const { PROVIDERS } = require('./chat-providers');
 
 // Only `npm run dev` sets this. Running unpackaged (`electron .`) still loads the
 // built bundle, so the window is never blank just because Vite isn't up.
@@ -24,6 +26,7 @@ let mainWindow = null;
 let workspace = null;
 let aiWorkspace = null;
 let docs = null;
+let chats = null;
 let controlServer = null;
 let controlStatus = { running: false, port: null, error: null };
 
@@ -142,6 +145,8 @@ function buildMenu() {
     {
       label: 'View',
       submenu: [
+        { label: 'AI Assistant (Beta)', accelerator: 'CmdOrCtrl+L', click: emit('chat:toggle') },
+        { type: 'separator' },
         { role: 'reload' },
         { role: 'toggleDevTools' },
         { type: 'separator' },
@@ -257,6 +262,17 @@ app.whenReady().then(async () => {
   });
   docs.on('error', (err) => console.error('[docs]', err));
 
+  chats = new ChatManager({
+    file: path.join(app.getPath('userData'), 'chats.json'),
+    workRoot: path.join(app.getPath('userData'), 'chat-sessions'),
+    mcp: mcpLaunchSpec,
+    settings: () => workspace.getState().settings.chat || {},
+  });
+  chats.load();
+  chats.on('chat', (chat) => mainWindow?.webContents.send('chat:changed', chat));
+  chats.on('list', (list) => mainWindow?.webContents.send('chat:list', list));
+  chats.on('error', (err) => console.error('[chat]', err));
+
   // Every mutation — from the UI or from an agent — refreshes the window.
   // Sync states ride along so the indicators never need a second round trip.
   workspace.on('changed', ({ reason, detail, state }) => {
@@ -287,10 +303,39 @@ app.on('before-quit', () => {
   workspace?.saveNow(); // flush any pending debounced write
   aiWorkspace?.saveNow();
   docs?.saveNow();
+  chats?.shutdown();
   controlServer?.stop();
 });
 
 /* --------------------------------------------------------------------- ipc */
+
+/**
+ * How to start hitnrun's MCP server: used by the setup instructions and by the
+ * in-app chat, which hands it to the CLI it runs.
+ */
+function mcpLaunchSpec() {
+  const settings = workspace.getState().settings;
+  const port = settings.controlServer?.port || 47600;
+  const token = settings.controlServer?.token || '';
+
+  // Packaged builds run a single esbuild bundle. Shipping the raw source
+  // instead would mean unpacking its whole transitive dependency tree from the
+  // asar, and any dep missed there fails only in the installed copy.
+  const serverPath = app.isPackaged
+    ? path.join(process.resourcesPath, 'app.asar.unpacked', 'mcp', 'server.bundle.js')
+    : path.join(__dirname, '..', 'mcp', 'server.js');
+
+  // An installed copy cannot assume Node exists on the machine. Electron ships
+  // a Node runtime, and ELECTRON_RUN_AS_NODE makes our own binary behave as
+  // one — so the MCP server runs with zero extra prerequisites.
+  const runtime = app.isPackaged ? process.execPath : 'node';
+  const env = {
+    HITNRUN_PORT: String(port),
+    ...(token ? { HITNRUN_TOKEN: token } : {}),
+    ...(app.isPackaged ? { ELECTRON_RUN_AS_NODE: '1' } : {}),
+  };
+  return { command: runtime, args: [serverPath], env, port, token };
+}
 
 // Only these workspace methods are reachable from the renderer.
 const ALLOWED_WS_METHODS = new Set([
@@ -606,26 +651,7 @@ function registerIpc() {
    * because Node cannot execute a script from inside one.
    */
   ipcMain.handle('ai:setupInfo', () => {
-    const settings = workspace.getState().settings;
-    const port = settings.controlServer?.port || 47600;
-    const token = settings.controlServer?.token || '';
-
-    // Packaged builds run a single esbuild bundle. Shipping the raw source
-    // instead would mean unpacking its whole transitive dependency tree from the
-    // asar, and any dep missed there fails only in the installed copy.
-    const serverPath = app.isPackaged
-      ? path.join(process.resourcesPath, 'app.asar.unpacked', 'mcp', 'server.bundle.js')
-      : path.join(__dirname, '..', 'mcp', 'server.js');
-
-    // An installed copy cannot assume Node exists on the machine. Electron ships
-    // a Node runtime, and ELECTRON_RUN_AS_NODE makes our own binary behave as
-    // one — so the MCP server runs with zero extra prerequisites.
-    const runtime = app.isPackaged ? process.execPath : 'node';
-    const env = {
-      HITNRUN_PORT: String(port),
-      ...(token ? { HITNRUN_TOKEN: token } : {}),
-      ...(app.isPackaged ? { ELECTRON_RUN_AS_NODE: '1' } : {}),
-    };
+    const { command: runtime, args: [serverPath], env, port, token } = mcpLaunchSpec();
 
     const envFlags = Object.entries(env)
       .map(([k, v]) => `--env ${k}=${v}`)
@@ -659,6 +685,53 @@ function registerIpc() {
     const normalized = normalizePolicy(policy);
     workspace.patchSettings({ aiPolicy: normalized });
     return normalized;
+  });
+
+  /* ------------------------------------------------------ AI chat (beta) */
+
+  // Static facts about each CLI; which ones are installed comes from chat:detect.
+  ipcMain.handle('chat:providers', () =>
+    Object.values(PROVIDERS).map((p) => ({
+      id: p.id,
+      label: p.label,
+      experimental: !!p.experimental,
+      install: p.install || null,
+      login: p.login || null,
+      models: p.models,
+      caps: p.caps,
+    }))
+  );
+  ipcMain.handle('chat:detect', (_e, force) => chats.detect(!!force));
+  ipcMain.handle('chat:list', () => chats.list());
+  ipcMain.handle('chat:get', (_e, id) => chats.get(id));
+  ipcMain.handle('chat:create', (_e, options) => chats.create(options));
+  ipcMain.handle('chat:rename', (_e, id, title) => chats.rename(id, title));
+  ipcMain.handle('chat:remove', (_e, id) => chats.remove(id));
+  ipcMain.handle('chat:stop', (_e, id) => chats.stop(id));
+  ipcMain.handle('chat:configure', (_e, id, options) => {
+    try {
+      return { ok: true, chat: chats.configure(id, options) };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+  ipcMain.handle('chat:send', async (_e, id, message) => {
+    // The chat's MCP server talks to the control server, so it has to be up.
+    if (!controlStatus.running) {
+      return { ok: false, error: 'The agent control server is off. Turn it on in Settings so the assistant can reach the app.' };
+    }
+    try {
+      return await chats.send(id, message);
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+  ipcMain.handle('chat:settings', (_e, patch = {}) => {
+    const current = workspace.getState().settings.chat || {};
+    const next = { ...current, ...patch, models: { ...current.models, ...patch.models } };
+    workspace.patchSettings({ chat: next });
+    if ('customCommand' in patch) chats.detect(true);
+    return next;
   });
 
   ipcMain.handle('control:status', () => controlStatus);
