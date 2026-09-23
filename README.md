@@ -34,7 +34,7 @@ Installers are built by GitHub Actions (`.github/workflows/release.yml`) wheneve
 a version tag is pushed:
 
 ```bash
-git tag v1.3.0 && git push origin v1.3.0
+git tag v1.3.1 && git push origin v1.3.1
 ```
 
 ---
@@ -51,9 +51,9 @@ npm test         # 97 headless tests of the engine, parser, sandbox and agent AP
 ### Building installers
 
 ```bash
-npm run dist:win     # -> release/hitnrun-Setup-1.3.0.exe
-npm run dist:mac     # -> release/hitnrun-1.3.0-arm64.dmg   (must be run on a Mac)
-npm run dist:linux   # -> release/hitnrun-1.3.0.AppImage
+npm run dist:win     # -> release/hitnrun-Setup-1.3.1.exe
+npm run dist:mac     # -> release/hitnrun-1.3.1-arm64.dmg   (must be run on a Mac)
+npm run dist:linux   # -> release/hitnrun-1.3.1.AppImage
 ```
 
 macOS builds have to be produced on macOS — Apple's toolchain cannot be run from
