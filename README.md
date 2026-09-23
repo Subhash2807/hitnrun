@@ -7,6 +7,38 @@ no team features, no telemetry.
 
 ---
 
+## Download
+
+Grab the installer for your machine from the
+[latest release](https://github.com/Subhash2807/hitnrun/releases/latest):
+
+| Platform | File |
+|---|---|
+| Windows 10/11 (x64) | `hitnrun-Setup-<version>.exe` |
+| macOS, Apple Silicon (M1 and later) | `hitnrun-<version>-arm64.dmg` |
+
+Both builds are **unsigned**, so the OS will warn you the first time:
+
+- **Windows** — SmartScreen says *"Windows protected your PC"*. Click
+  **More info → Run anyway**.
+- **macOS** — open the dmg, drag hitnrun into Applications, then run this once
+  before launching it:
+
+  ```bash
+  xattr -dr com.apple.quarantine /Applications/hitnrun.app
+  ```
+
+  See [Building a real .dmg](#building-a-real-dmg) if it still refuses to open.
+
+Installers are built by GitHub Actions (`.github/workflows/release.yml`) whenever
+a version tag is pushed:
+
+```bash
+git tag v1.3.0 && git push origin v1.3.0
+```
+
+---
+
 ## Running it
 
 ```bash
@@ -19,8 +51,8 @@ npm test         # 97 headless tests of the engine, parser, sandbox and agent AP
 ### Building installers
 
 ```bash
-npm run dist:win     # -> release/hitnrun Setup 1.3.0.exe
-npm run dist:mac     # -> release/hitnrun-1.3.0.dmg   (must be run on a Mac)
+npm run dist:win     # -> release/hitnrun-Setup-1.3.0.exe
+npm run dist:mac     # -> release/hitnrun-1.3.0-arm64.dmg   (must be run on a Mac)
 npm run dist:linux   # -> release/hitnrun-1.3.0.AppImage
 ```
 
@@ -40,7 +72,7 @@ Nothing is packaged or signed, so nothing fights Gatekeeper. Install
 [Node](https://nodejs.org) (20 or newer), then:
 
 ```bash
-git clone <your-repo> hitnrun && cd hitnrun
+git clone https://github.com/Subhash2807/hitnrun.git && cd hitnrun
 npm install
 npm start
 ```
