@@ -56,6 +56,10 @@ npm run dist:mac     # -> release/hitnrun-1.3.1-arm64.dmg   (must be run on a Ma
 npm run dist:linux   # -> release/hitnrun-1.3.1.AppImage
 ```
 
+The app icon is `build/icon.png`, rendered by `npm run icon` (a sky-blue disc with
+a white H, matching the mark in the top bar); electron-builder makes the `.ico`
+and `.icns` from it.
+
 macOS builds have to be produced on macOS — Apple's toolchain cannot be run from
 Windows. The code itself is platform-independent; only packaging is.
 
