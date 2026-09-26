@@ -14,6 +14,10 @@ import {
 import { METHODS, METHOD_COLORS } from '../lib/format.js';
 import { composeUrl, decomposeUrl, syncPathVars } from '../lib/url.js';
 
+// The tab each request was last on (Params, Body, …), so coming back to a
+// request shows the same tab. The view remounts for every request.
+const lastTab = new Map();
+
 export default function RequestView({ requestId, theme }) {
   const request = useStore((s) => s.getRequest(requestId));
   const patchRequest = useStore((s) => s.patchRequest);
@@ -35,7 +39,11 @@ export default function RequestView({ requestId, theme }) {
   const sidePanel = useStore((s) => s.state?.ui?.sidePanel || null);
   const setSidePanel = (panel) => patchUi({ sidePanel: panel });
 
-  const [tab, setTab] = useState('params');
+  const [tab, setTabState] = useState(() => lastTab.get(requestId) || 'params');
+  const setTab = (next) => {
+    lastTab.set(requestId, next);
+    setTabState(next);
+  };
   const [splitPct, setSplitPct] = useState(savedSplit ?? (sideBySide ? 50 : 48));
   useEffect(() => setSplitPct(savedSplit ?? (sideBySide ? 50 : 48)), [sideBySide]);
   const [urlFocused, setUrlFocused] = useState(false);

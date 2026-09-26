@@ -496,7 +496,7 @@ select {
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
   background: var(--bg-input);
-  overflow: hidden;
+  /* No overflow: hidden here: it would clip the method menu that opens below. */
   min-width: 0;
 }
 
@@ -517,6 +517,7 @@ select {
   cursor: pointer;
   flex-shrink: 0;
   position: relative;
+  border-radius: var(--radius) 0 0 var(--radius);
 }
 
 .method-select:hover {
@@ -530,6 +531,8 @@ select {
   font-family: var(--mono);
   font-size: 12.5px;
   min-width: 0;
+  background: transparent;
+  border-radius: 0 var(--radius) var(--radius) 0;
 }
 
 .url-input::placeholder {
@@ -2433,6 +2436,54 @@ textarea.editable {
   padding: 6px;
 }
 
+.chat-approval {
+  border: 1px solid var(--warn, #d9a441);
+  border-radius: 6px;
+  background: var(--bg-raised);
+  padding: 8px 10px;
+  font-size: 12px;
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.chat-approval:not(.pending) {
+  border-color: var(--border);
+}
+
+.chat-approval pre {
+  margin: 0;
+  max-height: 160px;
+  overflow: auto;
+  font-family: var(--mono);
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  background: var(--bg);
+  border-radius: 4px;
+  padding: 6px;
+}
+
+.chat-approval-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chat-approval-outcome {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.chat-approval-outcome.allowed {
+  color: var(--ok);
+}
+
+.chat-approval-outcome.denied,
+.chat-approval-outcome.expired {
+  color: var(--error);
+}
+
 .chat-welcome {
   flex: 1;
   min-height: 0;
@@ -2758,4 +2809,11 @@ textarea.editable {
 
 .md th {
   background: var(--bg-raised);
+}
+
+.step-curl {
+  width: auto;
+  padding: 0 6px;
+  font-family: var(--mono);
+  font-size: 10.5px;
 }

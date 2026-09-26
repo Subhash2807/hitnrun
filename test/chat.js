@@ -97,7 +97,7 @@ test('claude: tool calls and results, errors, and junk lines', () => {
   assert.equal(events.at(-1).error, 'boom');
 });
 
-test('claude: launches with only hitnrun tools and no permission prompts', () => {
+test('claude: launches with only hitnrun tools, asking permission in the chat', () => {
   const dir = fs.mkdtempSync(path.join(tmp, 'claude-'));
   const { args } = PROVIDERS.claude.launch({
     mcp: { command: 'node', args: ['server.js'], env: { HITNRUN_PORT: '1' } },
@@ -109,7 +109,8 @@ test('claude: launches with only hitnrun tools and no permission prompts', () =>
   const after = (flag) => args[args.indexOf(flag) + 1];
   assert.equal(after('--tools'), '', 'built-in tools (shell, files) are off');
   assert.equal(after('--allowedTools'), 'mcp__hitnrun');
-  assert.equal(after('--permission-prompts'), 'none');
+  assert.equal(after('--permission-prompt-tool'), 'mcp__hitnrun__approve');
+  assert.ok(!args.includes('--permission-prompts'), 'prompts go to the approve tool, not refused');
   assert.ok(args.includes('--strict-mcp-config'));
   assert.equal(after('--model'), 'haiku');
   assert.equal(after('--resume'), 'abc');
@@ -131,6 +132,18 @@ test('claude: an older CLI gets only the options it knows, and still no built-in
   const off = args.slice(args.indexOf('--disallowedTools') + 1, args.indexOf('--allowedTools'));
   for (const tool of ['Bash', 'Write', 'Edit', 'Read']) assert.ok(off.includes(tool), `${tool} disabled`);
   assert.equal(args[args.indexOf('--allowedTools') + 1], 'mcp__hitnrun');
+});
+
+test('claude: without the prompt tool, permission prompts are refused rather than hanging', () => {
+  const dir = fs.mkdtempSync(path.join(tmp, 'claude-noprompt-'));
+  const { args } = PROVIDERS.claude.launch({
+    mcp: { command: 'node', args: ['server.js'], env: {} },
+    systemPrompt: 'x',
+    workDir: dir,
+    supports: (flag) => flag !== '--permission-prompt-tool',
+  });
+  assert.ok(!args.includes('--permission-prompt-tool'));
+  assert.equal(args[args.indexOf('--permission-prompts') + 1], 'none');
 });
 
 test('help output is read into the set of long options', () => {
@@ -347,6 +360,48 @@ test('manager: an option the CLI rejects is dropped and the message retried', as
   assert.equal((await settle(chat)).status, 'done');
   m.shutdown();
   delete PROVIDERS.oldfake;
+});
+
+test('manager: approvals are asked in the reply and answered by the user', async () => {
+  const m = manager();
+  const chat = m.create();
+  // Nothing is running: nobody to ask, so it is denied.
+  assert.equal(await m.requestApproval({ chatId: chat.id, key: 'tool:x', title: 'Use x' }), false);
+
+  await m.send(chat.id, { text: 'slow please' });
+  const first = m.requestApproval({ chatId: chat.id, key: 'method:DELETE', title: 'Send DELETE /x', detail: 'blocked' });
+  const part = chat.messages.at(-1).parts.find((p) => p.kind === 'approval');
+  assert.equal(part.status, 'pending');
+  assert.equal(part.title, 'Send DELETE /x');
+  assert.ok(m.answerApproval(part.id, 'chat'));
+  assert.equal(await first, true);
+  assert.equal(part.status, 'allowed');
+  // "Allow for this chat" answers the same question from then on.
+  assert.equal(await m.requestApproval({ chatId: chat.id, key: 'method:DELETE', title: 'again' }), true);
+
+  const denied = m.requestApproval({ chatId: chat.id, key: 'tool:y', title: 'Use y' });
+  const second = chat.messages.at(-1).parts.filter((p) => p.kind === 'approval').at(-1);
+  m.answerApproval(second.id, 'deny');
+  assert.equal(await denied, false);
+  assert.equal(second.status, 'denied');
+
+  // Stopping the reply denies whatever is still waiting.
+  const waiting = m.requestApproval({ chatId: chat.id, key: 'tool:z', title: 'Use z' });
+  m.stop(chat.id);
+  assert.equal(await waiting, false);
+  assert.equal(m.answerApproval('ok_missing', 'once'), false);
+  await settle(chat);
+  m.shutdown();
+});
+
+test('manager: the chat id reaches the MCP server', () => {
+  let seen = null;
+  const m = manager();
+  const chat = m.create();
+  const provider = { ...PROVIDERS.fake, launch: (opts) => ((seen = opts.mcp.env), PROVIDERS.fake.launch(opts)) };
+  m._start(chat, provider, { id: 'r', parts: [], status: 'running' }, 'hi');
+  assert.equal(seen.HITNRUN_CHAT, chat.id);
+  m.shutdown();
 });
 
 test('manager: a crashed CLI becomes a readable error with a sign-in hint', async () => {

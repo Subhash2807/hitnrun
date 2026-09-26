@@ -55,7 +55,8 @@ request you send is saved in order, with its full response.
 - Mark each step **Pass** or **Fail** and add notes.
 - **Download** it as Markdown, HTML, PDF or a Postman collection to share.
   Passwords and tokens are hidden automatically.
-- Find your recordings in the **Docs** tab of the sidebar.
+- Find your recordings in the **Docs** tab of the sidebar. Each step has a
+  **cURL** button that copies exactly what was sent.
 
 ## Ask AI (beta)
 
@@ -74,6 +75,10 @@ API keys to set up. Codex CLI and Gemini CLI also work, but they're experimental
 delete them. It builds things in its own **AI** tab, and you choose what to keep.
 It can't send `DELETE` requests unless you allow them in **Settings → AI
 guardrails**.
+
+**You stay in charge.** When the AI needs permission, or a send is blocked by your
+guardrails, the chat asks you: **Allow once**, **Allow for this chat**, or
+**Deny**. If you don't answer within 4 minutes, it's denied.
 
 ## Use it from Claude Code
 

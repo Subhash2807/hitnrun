@@ -61,6 +61,7 @@ contextBridge.exposeInMainWorld('api', {
   chatRename: (id, title) => ipcRenderer.invoke('chat:rename', id, title),
   chatRemove: (id) => ipcRenderer.invoke('chat:remove', id),
   chatStop: (id) => ipcRenderer.invoke('chat:stop', id),
+  chatApprove: (approvalId, answer) => ipcRenderer.invoke('chat:approve', approvalId, answer),
   chatConfigure: (id, options) => ipcRenderer.invoke('chat:configure', id, options),
   chatSend: (id, message) => ipcRenderer.invoke('chat:send', id, message),
   chatSettings: (patch) => ipcRenderer.invoke('chat:settings', patch),

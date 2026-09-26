@@ -17,6 +17,8 @@
  *   HITNRUN_PORT   control server port  (default 47600)
  *   HITNRUN_TOKEN  control token, if set in the app's Settings
  *   HITNRUN_LABEL  a name for this session, shown in the app
+ *   HITNRUN_CHAT   set by the in-app chat: the chat that started this server,
+ *                  so the app can ask the user in that chat when approval is needed
  */
 
 const { McpServer } = require('@modelcontextprotocol/sdk/server/mcp.js');
@@ -26,6 +28,7 @@ const { z } = require('zod');
 const PORT = process.env.HITNRUN_PORT || 47600;
 const TOKEN = process.env.HITNRUN_TOKEN || '';
 const LABEL = process.env.HITNRUN_LABEL || '';
+const CHAT = process.env.HITNRUN_CHAT || '';
 const BASE = `http://127.0.0.1:${PORT}`;
 
 /** Session handle, established lazily on first use. */
@@ -39,6 +42,7 @@ async function callApp(method, path, body) {
       headers: {
         'Content-Type': 'application/json',
         ...(TOKEN ? { Authorization: `Bearer ${TOKEN}` } : {}),
+        ...(CHAT ? { 'X-Hitnrun-Chat': CHAT } : {}),
       },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
@@ -122,7 +126,7 @@ const guard = (fn) => async (args) => {
 const RECORD_HINT =
   'Add this send to the test doc being recorded, even in manual mode. In auto mode every send is recorded anyway.';
 
-const server = new McpServer({ name: 'hitnrun', version: '1.6.0' });
+const server = new McpServer({ name: 'hitnrun', version: '1.6.1' });
 
 /* ================================================================ status */
 
@@ -150,6 +154,34 @@ server.registerTool(
     };
   })
 );
+
+/* ============================================================== approval */
+
+// Only for the in-app chat: Claude Code is started with
+// --permission-prompt-tool pointing here, so a tool that needs permission is
+// asked about in the chat instead of being refused outright.
+if (CHAT) {
+  server.registerTool(
+    'approve',
+    {
+      title: 'Ask the user for permission',
+      description: 'Used by the CLI to ask the user in the hitnrun chat before running a tool. Do not call it yourself.',
+      inputSchema: { tool_name: z.string(), input: z.any().optional(), tool_use_id: z.string().optional() },
+    },
+    async ({ tool_name, input }) => {
+      let allowed = false;
+      try {
+        ({ allowed } = await callApp('POST', '/ai/approval', { tool: tool_name, input }));
+      } catch {
+        /* unreachable app: deny */
+      }
+      const verdict = allowed
+        ? { behavior: 'allow', updatedInput: input ?? {} }
+        : { behavior: 'deny', message: 'The user did not allow this.' };
+      return { content: [{ type: 'text', text: JSON.stringify(verdict) }] };
+    }
+  );
+}
 
 /* ======================================================= reading the user */
 

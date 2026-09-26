@@ -19,8 +19,13 @@ const { defaultRequest } = require('./workspace');
 const { parseSource, buildPatch, syncState, describeChanges } = require('./sync');
 
 class ControlServer {
-  constructor({ workspace, aiWorkspace, docs = null, environmentName = null, onEvent }) {
+  /**
+   * `approve({ chatId, key, title, detail })` asks the user in an in-app chat
+   * and resolves to true or false. Only calls that name a chat can ask.
+   */
+  constructor({ workspace, aiWorkspace, docs = null, environmentName = null, onEvent, approve = null }) {
     this.workspace = workspace;
+    this.approve = approve;
     this.aiWorkspace = aiWorkspace;
     this.docs = docs;
     this.environmentName = environmentName || (() => null);
@@ -117,14 +122,16 @@ class ControlServer {
       const body = await readJson(req);
       if (body === INVALID_JSON) return send(400, { error: 'Request body is not valid JSON' });
 
-      const result = await this._route(method, segments, url, body, send);
+      // The in-app chat's MCP server names its chat, so approvals can be asked there.
+      const ctx = { chatId: String(req.headers['x-hitnrun-chat'] || '') || null };
+      const result = await this._route(method, segments, url, body, ctx);
       if (result !== undefined) send(result.status ?? 200, result.body);
     } catch (err) {
       send(500, { error: err?.message || String(err), stack: err?.stack });
     }
   }
 
-  async _route(method, seg, url, body, send) {
+  async _route(method, seg, url, body, ctx = {}) {
     const ws = this.workspace;
     const [root, id, action] = seg;
 
@@ -183,7 +190,7 @@ class ControlServer {
     if (root === 'state') return { body: ws.getState() };
 
     /* ----------------------------------------------------------------- ai */
-    if (root === 'ai') return this._routeAi(method, seg, url, body);
+    if (root === 'ai') return this._routeAi(method, seg, url, body, ctx);
 
     /* ---------------------------------------------------------------- ui */
     // Only focuses a tab — nothing is written — so it sits outside the wall.
@@ -461,7 +468,7 @@ class ControlServer {
    * The AI-facing API. Everything here writes to the AI workspace only; the
    * user's requests are reachable read-only, and by copy.
    */
-  async _routeAi(method, seg, url, body) {
+  async _routeAi(method, seg, url, body, ctx = {}) {
     const ai = this.aiWorkspace;
     const [, section, id, action] = seg;
 
@@ -499,6 +506,18 @@ class ControlServer {
     /* ----------------------------------------------------------- workspace */
     if (section === 'workspace' && method === 'GET') {
       return { body: { collections: ai.getState().collections, sessions: ai.listSessions() } };
+    }
+
+    /* ----------------------------------------------------------- approval */
+    // The CLI's permission prompt, answered by the user in the chat.
+    if (section === 'approval' && method === 'POST') {
+      const tool = String(body?.tool || 'a tool');
+      const allowed = await this._ask(ctx, {
+        key: `tool:${tool}`,
+        title: `Use ${tool.replace(/^mcp__hitnrun__/, '')}`,
+        detail: body?.input == null ? '' : JSON.stringify(body.input, null, 2),
+      });
+      return { body: { allowed } };
     }
 
     if (section === 'policy' && method === 'GET') {
@@ -583,7 +602,7 @@ class ControlServer {
       if (method === 'POST' && id && action === 'send') {
         const hit = ai.findRequest(id);
         if (!hit) return { status: 404, body: { error: 'Request not found in the AI workspace' } };
-        return this._aiSend(hit.request, hit.collection, { record: body?.record === true });
+        return this._aiSend(hit.request, hit.collection, { record: body?.record === true, ctx });
       }
     }
 
@@ -597,28 +616,43 @@ class ControlServer {
       } else {
         fields = pickRequestFields(body || {});
       }
-      return this._aiSend(defaultRequest(fields), null, { record: body?.record === true });
+      return this._aiSend(defaultRequest(fields), null, { record: body?.record === true, ctx });
     }
 
     return { status: 404, body: { error: `No AI route for ${method} /${seg.join('/')}` } };
   }
 
   /** Run a request under AI guardrails, resolving variables from the user's environments. */
-  async _aiSend(request, collection, { record = false } = {}) {
+  async _aiSend(request, collection, { record = false, ctx = {} } = {}) {
     const policy = this._policy();
     const userState = this.workspace.getState();
 
-    const result = await execute(this.aiWorkspace.store, request, {
-      collection,
-      policy,
-      // Read-only view of the user's variables, so copied requests still resolve.
-      varSource: {
-        globals: [...(userState.globals || []), ...(this.aiWorkspace.getState().globals || [])],
-        environments: userState.environments,
-        activeEnvironmentId: userState.activeEnvironmentId,
-        settings: userState.settings,
-      },
-    });
+    const run = (activePolicy) =>
+      execute(this.aiWorkspace.store, request, {
+        collection,
+        policy: activePolicy,
+        // Read-only view of the user's variables, so copied requests still resolve.
+        varSource: {
+          globals: [...(userState.globals || []), ...(this.aiWorkspace.getState().globals || [])],
+          environments: userState.environments,
+          activeEnvironmentId: userState.activeEnvironmentId,
+          settings: userState.settings,
+        },
+      });
+
+    let result = await run(policy);
+
+    // Blocked from the in-app chat: the user can let this one send through.
+    if (result.response?.blocked && ctx.chatId) {
+      const reason = result.response.error.message;
+      const verb = String(request.method || 'GET').toUpperCase();
+      const allowed = await this._ask(ctx, {
+        key: /^\S+ is blocked for AI/.test(reason) ? `method:${verb}` : `send:${verb} ${request.url}`,
+        title: `Send ${verb} ${request.url}`,
+        detail: reason.replace(/\s*Ask the user.*$/s, ''),
+      });
+      if (allowed) result = await run({ ...policy, enabled: false });
+    }
 
     this.onEvent({ type: 'ai:changed' });
 
@@ -636,6 +670,16 @@ class ControlServer {
       };
     }
     return { body: withDoc(presentResult(result), doc) };
+  }
+
+  /** Ask the user in the chat named by `ctx`; false when nobody can be asked. */
+  async _ask(ctx, question) {
+    if (!ctx?.chatId || !this.approve) return false;
+    try {
+      return (await this.approve({ chatId: ctx.chatId, ...question })) === true;
+    } catch {
+      return false;
+    }
   }
 
   /** Test documentation: read and edit docs, drive the recording. */

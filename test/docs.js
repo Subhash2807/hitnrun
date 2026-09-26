@@ -448,6 +448,55 @@ function userWorkspace(base) {
     }
   });
 
+  await test('a blocked send from the in-app chat can be allowed by the user', async () => {
+    const ws = userWorkspace(base);
+    ws.patchSettings({ aiPolicy: { enabled: true, blockedHosts: [], blockedMethods: ['DELETE'] } });
+    const ai = new AiWorkspace(tmp('ai'), () => ws.getState());
+    ai.load();
+    const asked = [];
+    let answer = true;
+    const srv = new ControlServer({
+      workspace: ws,
+      aiWorkspace: ai,
+      approve: async (q) => (asked.push(q), answer),
+    });
+    const port = 48600 + Math.floor(Math.random() * 300);
+    await srv.start(port);
+    const send = (headers) =>
+      fetch(`http://127.0.0.1:${port}/ai/send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...headers },
+        body: JSON.stringify({ curl: `curl -X DELETE ${base}/x` }),
+      });
+    try {
+      // Not from a chat: nobody is asked, and it stays blocked.
+      assert.equal((await send({})).status, 403);
+      assert.equal(asked.length, 0);
+
+      const allowed = await send({ 'X-Hitnrun-Chat': 'chat_1' });
+      assert.equal(allowed.status, 200);
+      assert.equal(asked[0].chatId, 'chat_1');
+      assert.equal(asked[0].key, 'method:DELETE');
+      assert.match(asked[0].title, /^Send DELETE /);
+
+      answer = false;
+      assert.equal((await send({ 'X-Hitnrun-Chat': 'chat_1' })).status, 403);
+
+      // The CLI's permission prompt, through the approve tool.
+      answer = true;
+      const res = await fetch(`http://127.0.0.1:${port}/ai/approval`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Hitnrun-Chat': 'chat_1' },
+        body: JSON.stringify({ tool: 'mcp__hitnrun__send_request', input: { request_id: 'r1' } }),
+      });
+      assert.deepEqual(await res.json(), { allowed: true });
+      assert.equal(asked.at(-1).key, 'tool:mcp__hitnrun__send_request');
+      assert.equal(asked.at(-1).title, 'Use send_request');
+    } finally {
+      await srv.stop();
+    }
+  });
+
   server.close();
   for (const f of fs.readdirSync(os.tmpdir()).filter((n) => /^hitnrun-(docs|ws|ai|user)-/.test(n))) {
     fs.rmSync(path.join(os.tmpdir(), f), { force: true });

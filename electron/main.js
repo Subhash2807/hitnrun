@@ -220,6 +220,8 @@ async function startControlServer() {
     aiWorkspace,
     docs,
     environmentName: activeEnvironmentName,
+    // Guardrail and permission questions from the in-app chat are asked there.
+    approve: (question) => (chats ? chats.requestApproval(question) : Promise.resolve(false)),
     onEvent: (event) => {
       mainWindow?.webContents.send('control:event', event);
       if (event.focus && mainWindow) {
@@ -709,6 +711,7 @@ function registerIpc() {
   ipcMain.handle('chat:rename', (_e, id, title) => chats.rename(id, title));
   ipcMain.handle('chat:remove', (_e, id) => chats.remove(id));
   ipcMain.handle('chat:stop', (_e, id) => chats.stop(id));
+  ipcMain.handle('chat:approve', (_e, approvalId, answer) => chats.answerApproval(approvalId, answer));
   ipcMain.handle('chat:configure', (_e, id, options) => {
     try {
       return { ok: true, chat: chats.configure(id, options) };

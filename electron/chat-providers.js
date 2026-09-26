@@ -175,7 +175,12 @@ const claude = {
 
   // Options added in later Claude Code versions. Each is passed only when the
   // installed CLI lists it in --help, so older installs still start.
-  optional: ['--include-partial-messages', '--strict-mcp-config', '--tools', '--permission-prompts', '--append-system-prompt'],
+  optional: [
+    '--include-partial-messages', '--strict-mcp-config', '--tools', '--permission-prompt-tool', '--permission-prompts',
+    '--append-system-prompt',
+  ],
+  // Options the CLI accepts but doesn't list in --help.
+  hidden: ['--permission-prompt-tool'],
 
   launch({ mcp, model, resumeId, systemPrompt, workDir, supports = () => true }) {
     const config = path.join(workDir, 'claude-mcp.json');
@@ -188,8 +193,10 @@ const claude = {
     if (supports('--tools')) args.push('--tools', '');
     else args.push('--disallowedTools', ...CLAUDE_BUILTIN_TOOLS);
     args.push('--allowedTools', 'mcp__hitnrun');
-    // Anything that would need a prompt is refused rather than hanging.
-    if (supports('--permission-prompts')) args.push('--permission-prompts', 'none');
+    // Anything that needs permission is asked in the chat, through hitnrun's
+    // approve tool. Without that, it is refused rather than left hanging.
+    if (supports('--permission-prompt-tool')) args.push('--permission-prompt-tool', 'mcp__hitnrun__approve');
+    else if (supports('--permission-prompts')) args.push('--permission-prompts', 'none');
     if (supports('--append-system-prompt')) args.push('--append-system-prompt', systemPrompt);
     if (model) args.push('--model', model);
     if (resumeId) args.push('--resume', resumeId);

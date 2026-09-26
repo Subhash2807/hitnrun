@@ -209,6 +209,10 @@ function StepCard({ docId, step, index, total, expandAll, dragging, onDragStart,
     await api.copyToClipboard(text);
     showToast(`${what} copied`);
   };
+  const copyCurl = async () => {
+    await api.copyToClipboard(await api.toCurl(stepAsRequest(step)));
+    showToast(step.request.bodyTruncated ? 'cURL copied (the body was cut short when recorded)' : 'cURL copied');
+  };
 
   return (
     <div
@@ -261,6 +265,7 @@ function StepCard({ docId, step, index, total, expandAll, dragging, onDragStart,
         >
           {requestExists && <Item onClick={() => openTab(step.requestId)}>Open the request</Item>}
           <Item onClick={() => copy(step.request.url, 'URL')}>Copy URL</Item>
+          <Item onClick={copyCurl}>Copy as cURL</Item>
           {index > 0 && <Item onClick={() => docCall('moveStep', docId, step.id, index - 1)}>Move up</Item>}
           {index < total - 1 && <Item onClick={() => docCall('moveStep', docId, step.id, index + 1)}>Move down</Item>}
           <Separator />
@@ -275,6 +280,9 @@ function StepCard({ docId, step, index, total, expandAll, dragging, onDragStart,
         <code className="step-url" title={step.request.url}>{step.request.url}</code>
         <button className="icon-btn" title="Copy URL" onClick={() => copy(step.request.url, 'URL')}>
           <IconCopy width={12} height={12} />
+        </button>
+        <button className="icon-btn step-curl" title="Copy as cURL" onClick={copyCurl}>
+          cURL
         </button>
       </div>
       <div className="step-line step-meta">
@@ -350,6 +358,24 @@ function StepCard({ docId, step, index, total, expandAll, dragging, onDragStart,
 }
 
 /** Collapsed by default. Content is only rendered once opened, so big bodies cost nothing until needed. */
+// Headers curl works out itself; copying them would pin stale values.
+const SKIP_HEADERS = new Set(['content-length', 'host', 'connection', 'accept-encoding']);
+
+/** A recorded step as a request model, for cURL: exactly what was sent. */
+function stepAsRequest(step) {
+  const sent = step.request;
+  const headers = (sent.headers || [])
+    .map((h) => (Array.isArray(h) ? { key: h[0], value: h[1] } : { key: h?.key, value: h?.value }))
+    .filter((h) => h.key && !SKIP_HEADERS.has(String(h.key).toLowerCase()));
+  const hasBody = sent.body != null && sent.body !== '';
+  return {
+    method: sent.method,
+    url: sent.url,
+    headers,
+    body: hasBody ? { mode: 'raw', raw: sent.body, rawType: /json/i.test(sent.bodyContentType || '') ? 'json' : 'text' } : { mode: 'none' },
+  };
+}
+
 function Section({ title, count, meta, forceOpen, copyText, children }) {
   const [open, setOpen] = useState(false);
   const showToast = useStore((s) => s.showToast);

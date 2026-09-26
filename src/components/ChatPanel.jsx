@@ -336,7 +336,13 @@ function AssistantMessage({ message }) {
   return (
     <div className="chat-msg assistant">
       {message.parts.map((part, i) =>
-        part.kind === 'tool' ? <ToolCall key={part.id || i} part={part} /> : <Markdown key={i} text={part.text} />
+        part.kind === 'tool' ? (
+          <ToolCall key={part.id || i} part={part} />
+        ) : part.kind === 'approval' ? (
+          <Approval key={part.id} part={part} />
+        ) : (
+          <Markdown key={i} text={part.text} />
+        )
       )}
       {message.status === 'running' && (
         <div className="chat-typing">
@@ -382,6 +388,42 @@ function ToolCall({ part }) {
             </>
           )}
         </div>
+      )}
+    </div>
+  );
+}
+
+/** The AI is waiting for the user to allow something. */
+function Approval({ part }) {
+  const [busy, setBusy] = useState(false);
+  const answer = async (value) => {
+    setBusy(true);
+    await api.chatApprove(part.id, value);
+  };
+  const outcome = { allowed: 'Allowed', denied: 'Denied', expired: 'No answer — denied' }[part.status];
+  return (
+    <div className={`chat-approval ${part.status}`}>
+      <div className="chat-approval-title">
+        {part.status === 'pending' ? 'Permission needed: ' : ''}
+        <strong>{part.title}</strong>
+      </div>
+      {part.detail && <pre>{part.detail}</pre>}
+      {part.status === 'pending' ? (
+        <div className="chat-approval-actions">
+          <button className="btn btn-primary btn-sm" disabled={busy} onClick={() => answer('once')}>
+            Allow once
+          </button>
+          {part.key && (
+            <button className="btn btn-sm" disabled={busy} onClick={() => answer('chat')}>
+              Allow for this chat
+            </button>
+          )}
+          <button className="btn btn-sm" disabled={busy} onClick={() => answer('deny')}>
+            Deny
+          </button>
+        </div>
+      ) : (
+        <div className={`chat-approval-outcome ${part.status}`}>{outcome}</div>
       )}
     </div>
   );

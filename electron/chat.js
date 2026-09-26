@@ -24,6 +24,8 @@ const MAX_CHATS = 100;
 const MAX_TOOL_TEXT = 6000;
 // A kept-open CLI is closed after this long without a message; the next one resumes it.
 const IDLE_MS = 10 * 60 * 1000;
+// An unanswered approval is denied after this long (the MCP server's HTTP call would time out at 5 minutes).
+const APPROVAL_MS = 4 * 60 * 1000;
 
 const SYSTEM_PROMPT = [
   'You are the assistant built into hitnrun, a desktop API client like Postman.',
@@ -79,6 +81,8 @@ class ChatManager extends EventEmitter {
     this._emitTimers = new Map();
     this._detected = null;
     this._flags = new Map(); // provider id -> { listed: Set | null, rejected: Set }
+    this._approvals = new Map(); // approval id -> { chatId, part, resolve, timer }
+    this._allowed = new Map(); // chatId -> Set of approval keys allowed for the whole chat
   }
 
   /* --------------------------------------------------------- persistence */
@@ -90,6 +94,7 @@ class ChatManager extends EventEmitter {
         // A reply that was streaming when the app closed will never finish.
         for (const chat of this.state.chats) {
           for (const msg of chat.messages) {
+            for (const part of msg.parts || []) if (part.kind === 'approval' && part.status === 'pending') part.status = 'expired';
             if (msg.status === 'running') {
               msg.status = 'stopped';
               for (const part of msg.parts || []) if (part.status === 'running') part.status = 'stopped';
@@ -221,6 +226,7 @@ class ChatManager extends EventEmitter {
     this._retire(id);
     const before = this.state.chats.length;
     this.state.chats = this.state.chats.filter((c) => c.id !== id);
+    this._allowed.delete(id);
     fs.rm(path.join(this.workRoot, id), { recursive: true, force: true }, () => {});
     if (this.state.chats.length !== before) {
       this.scheduleSave();
@@ -268,6 +274,61 @@ class ChatManager extends EventEmitter {
     return { ok: true, message: 'Connected. Start a new claude session in your terminal to use it.' };
   }
 
+  /* ----------------------------------------------------------- approvals */
+
+  /**
+   * Ask the user, in the chat, to allow something the AI wants to do. Resolves
+   * true or false. `key` lets "Allow for this chat" skip the same question later.
+   */
+  requestApproval({ chatId, key, title, detail }) {
+    const chat = this.get(chatId);
+    const run = this.runs.get(chatId);
+    if (!chat || !run?.busy || !run.reply) return Promise.resolve(false);
+    if (key && this._allowed.get(chatId)?.has(key)) return Promise.resolve(true);
+    const part = {
+      kind: 'approval',
+      id: uid('ok'),
+      key: key || null,
+      title: String(title || 'Allow this?').slice(0, 300),
+      detail: cut(detail || '', 2000),
+      status: 'pending',
+    };
+    run.reply.parts.push(part);
+    this.touch(chat, { now: true });
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => this._settleApproval(part.id, 'expired'), APPROVAL_MS);
+      this._approvals.set(part.id, { chatId, part, resolve, timer });
+    });
+  }
+
+  /** The user's answer: 'once', 'chat' (for the rest of this chat) or 'deny'. */
+  answerApproval(approvalId, answer) {
+    const pending = this._approvals.get(approvalId);
+    if (!pending) return false;
+    if (answer === 'chat' && pending.part.key) {
+      if (!this._allowed.has(pending.chatId)) this._allowed.set(pending.chatId, new Set());
+      this._allowed.get(pending.chatId).add(pending.part.key);
+    }
+    this._settleApproval(approvalId, answer === 'once' || answer === 'chat' ? 'allowed' : 'denied');
+    return true;
+  }
+
+  _settleApproval(approvalId, status) {
+    const pending = this._approvals.get(approvalId);
+    if (!pending) return;
+    this._approvals.delete(approvalId);
+    clearTimeout(pending.timer);
+    pending.part.status = status;
+    pending.resolve(status === 'allowed');
+    const chat = this.get(pending.chatId);
+    if (chat) this.touch(chat, { now: true });
+  }
+
+  /** Deny whatever a chat is still waiting on (it stopped or closed). */
+  _denyPending(chatId) {
+    for (const [id, pending] of [...this._approvals]) if (pending.chatId === chatId) this._settleApproval(id, 'expired');
+  }
+
   /** Which optional options the installed CLI knows, read once from its --help. */
   async _probeFlags(provider) {
     if (!provider.optional || this._flags.has(provider.id)) return;
@@ -283,6 +344,8 @@ class ChatManager extends EventEmitter {
     const known = this._flags.get(provider.id);
     return (flag) => {
       if (known?.rejected.has(flag)) return false;
+      // Hidden from --help, so it is tried and dropped only if the CLI rejects it.
+      if (provider.hidden?.includes(flag)) return true;
       // Unreadable help: try everything, and drop what the CLI rejects.
       return known?.listed ? known.listed.has(flag) : true;
     };
@@ -338,6 +401,7 @@ class ChatManager extends EventEmitter {
   stop(chatId) {
     const run = this.runs.get(chatId);
     if (!run?.busy) return false;
+    this._denyPending(chatId);
     run.stopping = true;
     killTree(run.child);
     return true;
@@ -357,7 +421,7 @@ class ChatManager extends EventEmitter {
     fs.mkdirSync(workDir, { recursive: true });
 
     const mcp = this.mcp();
-    mcp.env = { ...mcp.env, HITNRUN_LABEL: `In-app chat: ${chat.title}`.slice(0, 80) };
+    mcp.env = { ...mcp.env, HITNRUN_LABEL: `In-app chat: ${chat.title}`.slice(0, 80), HITNRUN_CHAT: chat.id };
 
     const spec = provider.launch({
       mcp,
@@ -509,6 +573,7 @@ class ChatManager extends EventEmitter {
 
   _finish(chat, run, { cost }) {
     const reply = run.reply;
+    this._denyPending(chat.id);
     reply.status = 'done';
     // A kept-open CLI reports the running total for its process, not per reply.
     if (typeof cost === 'number') {
@@ -522,6 +587,7 @@ class ChatManager extends EventEmitter {
   }
 
   _fail(chat, reply, message) {
+    this._denyPending(chat.id);
     reply.status = 'error';
     reply.error = message || 'Something went wrong';
     this._settleTools(reply, 'stopped');
@@ -574,6 +640,7 @@ class ChatManager extends EventEmitter {
   /** Close a chat's CLI without treating it as a failure. */
   _retire(chatId) {
     const run = this.runs.get(chatId);
+    this._denyPending(chatId);
     if (!run) return;
     clearTimeout(run.idleTimer);
     run.retired = true;
