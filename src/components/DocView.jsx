@@ -3,7 +3,7 @@ import { useStore, api, findRequest } from '../store.js';
 import Dropdown, { Item, Separator } from './Dropdown.jsx';
 import { DOC_FORMATS } from './Modals.jsx';
 import {
-  IconMore, IconTrash, IconCopy, IconDownload, IconGrip, IconRecord, IconPause, IconPlay, IconStop, IconChevronDown,
+  IconMore, IconTrash, IconCopy, IconDownload, IconGrip, IconRecord, IconPause, IconPlay, IconStop, IconChevronDown, IconCamera,
 } from './Icons.jsx';
 import { METHOD_COLORS, prettyBytes, prettyTime, statusClass, relativeTime } from '../lib/format.js';
 
@@ -78,6 +78,9 @@ export default function DocView({ docId }) {
           <div className="grow" />
           {isRecording ? (
             <>
+              <button className="btn btn-sm" title="Add a screenshot of any screen or window" onClick={() => openModal({ type: 'screenshot' })}>
+                <IconCamera width={12} height={12} /> Screenshot
+              </button>
               <button className="btn btn-sm" onClick={() => docCall('setRecording', { paused: !recording.paused })}>
                 {recording.paused ? <IconPlay width={11} height={11} /> : <IconPause width={12} height={12} />}
                 {recording.paused ? 'Resume' : 'Pause'}
@@ -154,8 +157,8 @@ export default function DocView({ docId }) {
           <div className="tree-empty" style={{ padding: 40 }}>
             {isRecording
               ? recording.mode === 'auto'
-                ? 'Send a request — it will appear here as step 1.'
-                : 'Send a request, then press “+ Add to doc” on the response.'
+                ? 'Send a request, or take a screenshot. It will appear here as step 1.'
+                : 'Send a request, then press “+ Add to doc” on the response. Screenshots are added straight away.'
               : 'No steps. Resume recording to add some.'}
           </div>
         )}
@@ -202,7 +205,7 @@ function StepCard({ docId, step, index, total, expandAll, dragging, onDragStart,
   const showToast = useStore((s) => s.showToast);
   const requestExists = useStore((s) => !!(step.requestId && findRequest(s.state, step.requestId)));
   const [grab, setGrab] = useState(false);
-  const r = step.response;
+  const shot = step.kind === 'shot';
 
   const update = (patch) => docCall('updateStep', docId, step.id, patch);
   const copy = async (text, what) => {
@@ -263,9 +266,18 @@ function StepCard({ docId, step, index, total, expandAll, dragging, onDragStart,
             </button>
           )}
         >
-          {requestExists && <Item onClick={() => openTab(step.requestId)}>Open the request</Item>}
-          <Item onClick={() => copy(step.request.url, 'URL')}>Copy URL</Item>
-          <Item onClick={copyCurl}>Copy as cURL</Item>
+          {shot ? (
+            <>
+              <Item onClick={() => api.shotOpen(step.shot.file)}>Open image</Item>
+              <Item onClick={() => api.shotCopy(step.shot.file).then((ok) => showToast(ok ? 'Image copied' : 'Screenshot file is missing'))}>Copy image</Item>
+            </>
+          ) : (
+            <>
+              {requestExists && <Item onClick={() => openTab(step.requestId)}>Open the request</Item>}
+              <Item onClick={() => copy(step.request.url, 'URL')}>Copy URL</Item>
+              <Item onClick={copyCurl}>Copy as cURL</Item>
+            </>
+          )}
           {index > 0 && <Item onClick={() => docCall('moveStep', docId, step.id, index - 1)}>Move up</Item>}
           {index < total - 1 && <Item onClick={() => docCall('moveStep', docId, step.id, index + 1)}>Move down</Item>}
           <Separator />
@@ -275,13 +287,51 @@ function StepCard({ docId, step, index, total, expandAll, dragging, onDragStart,
         </Dropdown>
       </div>
 
+      {shot ? (
+        <div className="step-line step-meta">
+          <span className="step-chip"><IconCamera width={11} height={11} /> Screenshot</span>
+          {step.shot.source && <span>{step.shot.source}</span>}
+          {step.shot.width && <span>{step.shot.width} × {step.shot.height}</span>}
+          <span title={new Date(step.at).toLocaleString()}>{relativeTime(step.at)}</span>
+        </div>
+      ) : (
+        <RequestLines step={step} onCopyUrl={() => copy(step.request.url, 'URL')} onCopyCurl={copyCurl} />
+      )}
+
+      <div className="step-notes">
+        <label>
+          <span>Expected</span>
+          <EditableText value={step.expected} onSave={(expected) => update({ expected })} placeholder="What should happen" />
+        </label>
+        <label>
+          <span>Note</span>
+          <EditableText multiline value={step.note} onSave={(note) => update({ note })} placeholder="What this step shows, anything odd you noticed" />
+        </label>
+      </div>
+
+      {shot ? (
+        <button className="step-shot" title="Open full size" onClick={() => api.shotOpen(step.shot.file)}>
+          <img src={`hitnrun-shot://shots/${step.shot.file}`} alt={step.title} loading="lazy" />
+        </button>
+      ) : (
+        <RequestSections step={step} expandAll={expandAll} />
+      )}
+    </div>
+  );
+}
+
+/** Method, URL and the result line of a request step. */
+function RequestLines({ step, onCopyUrl, onCopyCurl }) {
+  const r = step.response;
+  return (
+    <>
       <div className="step-line">
         <span className={`method-badge ${METHOD_COLORS[step.request.method] || ''}`}>{step.request.method}</span>
         <code className="step-url" title={step.request.url}>{step.request.url}</code>
-        <button className="icon-btn" title="Copy URL" onClick={() => copy(step.request.url, 'URL')}>
+        <button className="icon-btn" title="Copy URL" onClick={onCopyUrl}>
           <IconCopy width={12} height={12} />
         </button>
-        <button className="icon-btn step-curl" title="Copy as cURL" onClick={copyCurl}>
+        <button className="icon-btn step-curl" title="Copy as cURL" onClick={onCopyCurl}>
           cURL
         </button>
       </div>
@@ -305,18 +355,15 @@ function StepCard({ docId, step, index, total, expandAll, dragging, onDragStart,
           </span>
         )}
       </div>
+    </>
+  );
+}
 
-      <div className="step-notes">
-        <label>
-          <span>Expected</span>
-          <EditableText value={step.expected} onSave={(expected) => update({ expected })} placeholder="What should happen" />
-        </label>
-        <label>
-          <span>Note</span>
-          <EditableText multiline value={step.note} onSave={(note) => update({ note })} placeholder="What this step shows, anything odd you noticed" />
-        </label>
-      </div>
-
+/** The collapsible headers, bodies and tests of a request step. */
+function RequestSections({ step, expandAll }) {
+  const r = step.response;
+  return (
+    <>
       <Section title="Request headers" count={step.request.headers.length} forceOpen={expandAll}>
         <HeaderTable pairs={step.request.headers} />
       </Section>
@@ -353,11 +400,10 @@ function StepCard({ docId, step, index, total, expandAll, dragging, onDragStart,
           </ul>
         </Section>
       )}
-    </div>
+    </>
   );
 }
 
-/** Collapsed by default. Content is only rendered once opened, so big bodies cost nothing until needed. */
 // Headers curl works out itself; copying them would pin stale values.
 const SKIP_HEADERS = new Set(['content-length', 'host', 'connection', 'accept-encoding']);
 
@@ -376,6 +422,7 @@ function stepAsRequest(step) {
   };
 }
 
+/** Collapsed by default. Content is only rendered once opened, so big bodies cost nothing until needed. */
 function Section({ title, count, meta, forceOpen, copyText, children }) {
   const [open, setOpen] = useState(false);
   const showToast = useStore((s) => s.showToast);

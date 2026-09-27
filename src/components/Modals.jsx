@@ -25,6 +25,7 @@ export default function Modals() {
       {modal.type === 'startRecording' && <StartRecordingModal docId={modal.docId} />}
       {modal.type === 'renameDoc' && <RenameDoc id={modal.id} initial={modal.name} />}
       {modal.type === 'exportDoc' && <ExportDocModal id={modal.id} format={modal.format} />}
+      {modal.type === 'screenshot' && <ScreenshotModal />}
     </Shell>
   );
 }
@@ -591,6 +592,94 @@ function ExportDocModal({ id, format: initialFormat }) {
         <button className="btn btn-primary" disabled={busy} onClick={submit}>
           {busy ? <span className="spinner" /> : 'Download'}
         </button>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------- screenshots */
+
+/**
+ * Pick what to capture: each screen and open window, with a live preview.
+ * hitnrun steps out of the way while a screen is captured.
+ */
+function ScreenshotModal() {
+  const closeModal = useStore((s) => s.closeModal);
+  const recording = useStore((s) => s.recording);
+  const takeShot = useStore((s) => s.takeShot);
+  const pasteShot = useStore((s) => s.pasteShot);
+  const [list, setList] = useState(null); // { ok, sources } | { ok: false, permission }
+  const [busy, setBusy] = useState(false);
+  const isMac = navigator.userAgent.includes('Mac');
+
+  const load = () => {
+    setList(null);
+    api.shotSources().then(setList, (err) => setList({ ok: false, error: err.message }));
+  };
+  useEffect(load, []);
+
+  if (!recording) {
+    return (
+      <div className="modal" style={{ maxWidth: 420 }}>
+        <Head title="Screenshot" />
+        <div className="modal-body" style={{ padding: 16 }}>Start a recording first. Screenshots are added to the doc being recorded.</div>
+      </div>
+    );
+  }
+
+  const pick = async (id) => {
+    setBusy(true);
+    closeModal(); // out of the picture before it's taken
+    await takeShot(id);
+  };
+  const paste = async () => {
+    const out = await pasteShot();
+    if (out.ok) closeModal();
+  };
+
+  const screens = list?.sources?.filter((s) => s.kind === 'screen') || [];
+  const windows = list?.sources?.filter((s) => s.kind === 'window') || [];
+  const Tile = ({ s }) => (
+    <button className="shot-tile" disabled={busy} onClick={() => pick(s.id)} title={s.name}>
+      <img src={s.thumbnail} alt="" />
+      <span className="ellipsis">{s.name}</span>
+    </button>
+  );
+
+  return (
+    <div className="modal shot-modal">
+      <Head title={`Add a screenshot to “${recording.name}”`} />
+      <div className="modal-body" style={{ padding: 16 }}>
+        {!list && <div className="dim" style={{ padding: 30, textAlign: 'center' }}><span className="spinner" /> Looking for screens and windows…</div>}
+        {list && !list.ok && list.permission && (
+          <div className="shot-permission">
+            <b>hitnrun needs permission to take screenshots.</b>
+            <p>
+              Open <b>System Settings → Privacy &amp; Security → Screen Recording</b> and turn on <b>hitnrun</b>. macOS
+              may ask you to quit and reopen hitnrun afterwards.
+            </p>
+            <div className="row" style={{ gap: 8 }}>
+              <button className="btn btn-primary" onClick={() => api.shotSettings()}>Open Screen Recording settings</button>
+              <button className="btn" onClick={load}>Check again</button>
+            </div>
+          </div>
+        )}
+        {list && !list.ok && !list.permission && <div style={{ color: 'var(--error)' }}>{list.error || 'Could not list screens.'}</div>}
+        {list?.ok && (
+          <>
+            <div className="shot-group">Screens</div>
+            <div className="shot-grid">{screens.map((s) => <Tile key={s.id} s={s} />)}</div>
+            {windows.length > 0 && <div className="shot-group">Windows</div>}
+            <div className="shot-grid">{windows.map((s) => <Tile key={s.id} s={s} />)}</div>
+          </>
+        )}
+      </div>
+      <div className="modal-foot">
+        <span className="dim" style={{ fontSize: 11.5, marginRight: 'auto' }}>
+          Tip: {isMac ? 'Cmd' : 'Ctrl'}+Shift+S captures the screen you're on, from any app.
+        </span>
+        <button className="btn" onClick={paste} title="Add an image you copied, e.g. with the system snipping tool">Paste image</button>
+        <button className="btn" onClick={closeModal}>Cancel</button>
       </div>
     </div>
   );

@@ -497,9 +497,131 @@ function userWorkspace(base) {
     }
   });
 
+  /* ------------------------------------------------------------ screenshots */
+
+  // A real 1x1 PNG, so anything that decodes it would work.
+  const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+  const shotStore = () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hitnrun-shots-'));
+    const store = new DocStore(path.join(dir, 'docs.json'));
+    store.load();
+    return { store, dir, assets: () => (fs.existsSync(store.assetsDir) ? fs.readdirSync(store.assetsDir) : []) };
+  };
+  const settle = () => new Promise((r) => setTimeout(r, 50)); // file removal is async
+
+  await test('screenshot steps: saved as files, interleaved with requests', async () => {
+    const { store, assets } = shotStore();
+    const { docId } = store.startRecording({ name: 'UI check' });
+    store.capture(await execute(userWorkspace(base), defaultRequest({ method: 'GET', url: `${base}/one` }), { recordHistory: false }));
+    const shot = store.addShot(docId, PNG, { source: 'Chrome - My App', width: 1, height: 1 });
+    assert.equal(shot.kind, 'shot');
+    assert.equal(shot.title, 'Screenshot — Chrome - My App');
+    assert.equal(shot.status, 'untested');
+    assert.deepEqual(assets(), [shot.shot.file]);
+    assert.deepEqual(store.readShot(shot.shot.file), PNG);
+    assert.ok(!JSON.stringify(store.state).includes(PNG.toString('base64')), 'image bytes must not be in docs.json');
+
+    const doc = store.get(docId);
+    assert.deepEqual(doc.steps.map((s) => s.kind || 'request'), ['request', 'shot']);
+    store.updateStep(docId, shot.id, { title: 'Login page', note: 'Button is disabled', status: 'pass' });
+    assert.equal(store.list()[0].counts.pass, 1);
+    assert.ok(store.moveStep(docId, shot.id, 0));
+    assert.equal(store.get(docId).steps[0].id, shot.id);
+
+    // Only our own file names resolve, so nothing outside the folder can be read.
+    assert.equal(store.shotPath('../docs.json'), null);
+    assert.equal(store.shotPath('shot_zzzz.png'), null);
+    assert.equal(store.addShot(docId, Buffer.alloc(0)), null);
+    assert.equal(store.addShot('doc_missing', PNG), null);
+  });
+
+  await test('screenshot files go with their step, doc, and survive duplication', async () => {
+    const { store, dir, assets } = shotStore();
+    const doc = store.create({ name: 'Shots' });
+    const a = store.addShot(doc.id, PNG, {});
+    const b = store.addShot(doc.id, PNG, {});
+    assert.equal(a.title, 'Screenshot');
+    assert.equal(assets().length, 2);
+
+    store.deleteStep(doc.id, a.id);
+    await settle();
+    assert.deepEqual(assets(), [b.shot.file]);
+
+    const copy = store.duplicate(doc.id);
+    const copied = copy.steps[0].shot.file;
+    assert.notEqual(copied, b.shot.file);
+    assert.equal(assets().length, 2);
+    store.remove(doc.id);
+    await settle();
+    assert.deepEqual(assets(), [copied], "deleting the original keeps the copy's image");
+
+    // A file nothing points at (a crash between write and save) is cleaned up on start.
+    fs.writeFileSync(path.join(store.assetsDir, 'shot_0123456789abcdef.png'), PNG);
+    fs.writeFileSync(path.join(store.assetsDir, 'notes.txt'), 'not ours');
+    store.saveNow();
+    const reopened = new DocStore(path.join(dir, 'docs.json'));
+    reopened.load();
+    assert.deepEqual(fs.readdirSync(reopened.assetsDir).sort(), ['notes.txt', copied].sort());
+  });
+
+  await test('screenshot exports: HTML embeds, Markdown links, Postman skips', async () => {
+    const { store } = shotStore();
+    const { docId } = store.startRecording({ name: 'Export shots' });
+    store.capture(await execute(userWorkspace(base), defaultRequest({ method: 'GET', url: `${base}/one`, headers: [{ key: 'Authorization', value: 'Bearer secret-token-123456', enabled: true }] }), { recordHistory: false }));
+    const shot = store.addShot(docId, PNG, { source: 'Screen 2' });
+    store.updateStep(docId, shot.id, { title: 'Result [page]', note: 'line one\nline two', expected: 'Green banner' });
+    const doc = store.get(docId);
+    const image = (f) => store.readShot(f);
+
+    const html = toHtml(doc, { image });
+    assert.ok(html.includes(`data:image/png;base64,${PNG.toString('base64')}`));
+    assert.ok(html.includes('📷 Screenshot'));
+    assert.ok(html.includes('line one<br>line two'));
+    assert.ok(!html.includes('secret-token-123456'), 'masking still works around screenshots');
+    assert.ok(toHtml(doc).includes('Screenshot file is missing'));
+
+    const md = toMarkdown(doc, { imageDir: 'Export shots images' });
+    assert.ok(md.includes(`![Result page](<Export shots images/${shot.id}.png>)`));
+    assert.ok(md.includes('> line one\n> line two'));
+    assert.ok(md.includes('| 2 | Result [page] | 📷 Screenshot |'));
+    assert.ok(toMarkdown(doc).includes('_Screenshot not included._'));
+
+    const pm = JSON.parse(toPostman(doc));
+    assert.equal(pm.item.length, 1);
+    assert.equal(pm.item[0].name.startsWith('1. '), true);
+    assert.equal(maskDoc(doc).steps[1].shot.file, shot.shot.file);
+  });
+
+  await test('agents see screenshot steps without the image', async () => {
+    const { store } = shotStore();
+    const ws = new Workspace(tmp('ws'));
+    ws.load();
+    const ai = new AiWorkspace(tmp('ai'), () => ws.getState());
+    ai.load();
+    const { docId } = store.startRecording({ name: 'For Claude' });
+    const shot = store.addShot(docId, PNG, { source: 'Chrome', width: 1, height: 1 });
+    const srv = new ControlServer({ workspace: ws, aiWorkspace: ai, docs: store });
+    const port = 48900 + Math.floor(Math.random() * 90);
+    await srv.start(port);
+    try {
+      const doc = await (await fetch(`http://127.0.0.1:${port}/docs/${docId}`)).json();
+      assert.deepEqual(doc.steps[0].shot, { source: 'Chrome', width: 1, height: 1 });
+      assert.equal(doc.steps[0].kind, 'shot');
+      const res = await fetch(`http://127.0.0.1:${port}/docs/${docId}/steps/${shot.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ note: 'Looks right', status: 'pass' }),
+      });
+      assert.equal(res.status, 200);
+      assert.equal(store.get(docId).steps[0].note, 'Looks right');
+    } finally {
+      await srv.stop();
+    }
+  });
+
   server.close();
-  for (const f of fs.readdirSync(os.tmpdir()).filter((n) => /^hitnrun-(docs|ws|ai|user)-/.test(n))) {
-    fs.rmSync(path.join(os.tmpdir(), f), { force: true });
+  for (const f of fs.readdirSync(os.tmpdir()).filter((n) => /^hitnrun-(docs|ws|ai|user|shots)-/.test(n))) {
+    fs.rmSync(path.join(os.tmpdir(), f), { force: true, recursive: true });
   }
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

@@ -126,7 +126,7 @@ const guard = (fn) => async (args) => {
 const RECORD_HINT =
   'Add this send to the test doc being recorded, even in manual mode. In auto mode every send is recorded anyway.';
 
-const server = new McpServer({ name: 'hitnrun', version: '1.6.1' });
+const server = new McpServer({ name: 'hitnrun', version: '1.7.0-beta.1' });
 
 /* ================================================================ status */
 
@@ -362,7 +362,7 @@ server.registerTool(
   {
     title: 'Read a test doc',
     description:
-      'Read one test doc with every step: the full URL, headers and body sent, the response, the notes, expected result and pass/fail status. Bodies are cut at 8,000 characters unless full_bodies is set.',
+      'Read one test doc with every step: the full URL, headers and body sent, the response, the notes, expected result and pass/fail status. Bodies are cut at 8,000 characters unless full_bodies is set. Steps with kind "shot" are screenshots the user took; you get their title, note and status but not the image.',
     inputSchema: {
       doc_id: z.string(),
       full_bodies: z.boolean().optional().describe('Return request and response bodies uncut'),

@@ -1,6 +1,6 @@
 import { useStore } from '../store.js';
 import Dropdown, { Item, Separator } from './Dropdown.jsx';
-import { IconMore, IconDoc, IconRecord, IconStop, IconPause, IconPlay, IconTrash, IconCopy, IconDownload } from './Icons.jsx';
+import { IconMore, IconDoc, IconRecord, IconStop, IconPause, IconPlay, IconTrash, IconCopy, IconDownload, IconCamera } from './Icons.jsx';
 import { relativeTime } from '../lib/format.js';
 
 /** Sidebar list of test docs, with the recording controls on top. */
@@ -175,26 +175,35 @@ export function RecordControl() {
   }
 
   return (
-    <Dropdown
-      align="right"
-      trigger={(open) => (
-        <button className={`rec-chip ${recording.paused ? 'paused' : ''}`} onClick={open} title="Recording controls">
-          <span className={`rec-dot ${recording.paused ? '' : 'pulse'}`} />
-          <span className="ellipsis" style={{ maxWidth: 160 }}>{recording.name}</span>
-          <span className="rec-count">{recording.stepCount}</span>
-        </button>
-      )}
-    >
-      <Item onClick={() => openTab(recording.docId)} icon={<IconDoc width={12} height={12} />}>Open doc</Item>
-      <Item onClick={() => docCall('setRecording', { paused: !recording.paused })} icon={recording.paused ? <IconPlay width={12} height={12} /> : <IconPause width={12} height={12} />}>
-        {recording.paused ? 'Resume' : 'Pause'}
-      </Item>
-      <Item onClick={() => docCall('setRecording', { mode: recording.mode === 'auto' ? 'manual' : 'auto' })}>
-        {recording.mode === 'auto' ? 'Switch to manual (add responses yourself)' : 'Switch to auto (record every send)'}
-      </Item>
-      <Separator />
-      <Item danger onClick={stopRecording} icon={<IconStop width={12} height={12} />}>Stop recording</Item>
-    </Dropdown>
+    <>
+      <button
+        className="icon-btn shot-btn"
+        title={`Add a screenshot to "${recording.name}" (${navigator.userAgent.includes('Mac') ? 'Cmd' : 'Ctrl'}+Shift+S, works from any app)`}
+        onClick={() => openModal({ type: 'screenshot' })}
+      >
+        <IconCamera width={15} height={15} />
+      </button>
+      <Dropdown
+        align="right"
+        trigger={(open) => (
+          <button className={`rec-chip ${recording.paused ? 'paused' : ''}`} onClick={open} title="Recording controls">
+            <span className={`rec-dot ${recording.paused ? '' : 'pulse'}`} />
+            <span className="ellipsis" style={{ maxWidth: 160 }}>{recording.name}</span>
+            <span className="rec-count">{recording.stepCount}</span>
+          </button>
+        )}
+      >
+        <Item onClick={() => openTab(recording.docId)} icon={<IconDoc width={12} height={12} />}>Open doc</Item>
+        <Item onClick={() => docCall('setRecording', { paused: !recording.paused })} icon={recording.paused ? <IconPlay width={12} height={12} /> : <IconPause width={12} height={12} />}>
+          {recording.paused ? 'Resume' : 'Pause'}
+        </Item>
+        <Item onClick={() => docCall('setRecording', { mode: recording.mode === 'auto' ? 'manual' : 'auto' })}>
+          {recording.mode === 'auto' ? 'Switch to manual (add responses yourself)' : 'Switch to auto (record every send)'}
+        </Item>
+        <Separator />
+        <Item danger onClick={stopRecording} icon={<IconStop width={12} height={12} />}>Stop recording</Item>
+      </Dropdown>
+    </>
   );
 }
 

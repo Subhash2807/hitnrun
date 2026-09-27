@@ -2817,3 +2817,93 @@ textarea.editable {
   font-family: var(--mono);
   font-size: 10.5px;
 }
+
+/* ------------------------------------------------------------ screenshots */
+
+.shot-btn {
+  margin-right: 4px;
+}
+
+.step-meta .step-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
+.step-shot {
+  display: block;
+  margin: 10px 0 2px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  cursor: zoom-in;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.step-shot img {
+  display: block;
+  max-width: 100%;
+  max-height: 560px;
+  object-fit: contain;
+}
+
+.shot-modal {
+  max-width: 760px;
+  width: 92vw;
+}
+
+.shot-group {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+  margin: 4px 0 8px;
+}
+
+.shot-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+  max-height: 52vh;
+  overflow: auto;
+}
+
+.shot-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.shot-tile:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.shot-tile img {
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  object-fit: contain;
+  background: var(--bg);
+  border-radius: 4px;
+}
+
+.shot-tile span {
+  font-size: 12px;
+}
+
+.shot-permission p {
+  margin: 8px 0 12px;
+  color: var(--text-dim);
+}

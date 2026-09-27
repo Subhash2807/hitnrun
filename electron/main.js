@@ -1,8 +1,11 @@
 'use strict';
 
-const { app, BrowserWindow, ipcMain, dialog, clipboard, shell, Menu } = require('electron');
+const {
+  app, BrowserWindow, ipcMain, dialog, clipboard, shell, Menu, globalShortcut, Notification, nativeImage, protocol, net,
+} = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
+const { pathToFileURL } = require('node:url');
 
 const { Workspace, defaultRequest, uid } = require('./workspace');
 const { AiWorkspace } = require('./ai-workspace');
@@ -17,6 +20,12 @@ const { importPostman } = require('./postman');
 const codegen = require('./codegen');
 const { ChatManager } = require('./chat');
 const { PROVIDERS } = require('./chat-providers');
+const screenshots = require('./screenshots');
+
+// Screenshot steps are shown from their files through this scheme, so the page
+// never needs file:// access. Must be declared before the app is ready.
+const SHOT_SCHEME = 'hitnrun-shot';
+protocol.registerSchemesAsPrivileged([{ scheme: SHOT_SCHEME, privileges: { standard: true, secure: true } }]);
 
 // Only `npm run dev` sets this. Running unpackaged (`electron .`) still loads the
 // built bundle, so the window is never blank just because Vite isn't up.
@@ -261,6 +270,7 @@ app.whenReady().then(async () => {
   docs.load();
   docs.on('changed', ({ reason, docId }) => {
     mainWindow?.webContents.send('docs:changed', { reason, docId, ...docsSnapshot() });
+    syncShotShortcut();
   });
   docs.on('error', (err) => console.error('[docs]', err));
 
@@ -287,7 +297,13 @@ app.whenReady().then(async () => {
   });
   workspace.on('error', (err) => console.error('[workspace]', err));
 
+  protocol.handle(SHOT_SCHEME, (req) => {
+    const full = docs.shotPath(decodeURIComponent(new URL(req.url).pathname.slice(1)));
+    return full ? net.fetch(pathToFileURL(full).href) : new Response('Not found', { status: 404 });
+  });
+
   registerIpc();
+  syncShotShortcut();
   buildMenu();
   createWindow();
   await startControlServer();
@@ -308,6 +324,8 @@ app.on('before-quit', () => {
   chats?.shutdown();
   controlServer?.stop();
 });
+
+app.on('will-quit', () => globalShortcut.unregisterAll());
 
 /* --------------------------------------------------------------------- ipc */
 
@@ -372,13 +390,66 @@ function recordToDocs(result, meta = {}) {
   return docs.capture(result, { environment: activeEnvironmentName(), ...meta });
 }
 
+/* ------------------------------------------------------------ screenshots */
+
+const SHOT_SHORTCUT = 'CommandOrControl+Shift+S';
+let shotShortcutOn = false;
+
+/**
+ * The screenshot shortcut works from any app, but only while recording, so it
+ * never takes Ctrl+Shift+S away from other apps the rest of the time.
+ */
+function syncShotShortcut() {
+  const want = !!docs?.recording();
+  if (want === shotShortcutOn) return;
+  if (want) shotShortcutOn = globalShortcut.register(SHOT_SHORTCUT, onShotShortcut);
+  else {
+    globalShortcut.unregister(SHOT_SHORTCUT);
+    shotShortcutOn = false;
+  }
+}
+
+async function onShotShortcut() {
+  // In hitnrun you get the picker; from another app, the screen you're on.
+  if (mainWindow?.isFocused()) return mainWindow.webContents.send('menu:command', 'shot:pick');
+  const out = await takeShot('screen:cursor');
+  if (!Notification.isSupported()) return;
+  const body = out.ok
+    ? `Added as step ${out.index} in "${out.docName}"`
+    : out.permission
+      ? 'hitnrun needs Screen Recording permission. Open hitnrun to allow it.'
+      : out.error;
+  new Notification({ title: out.ok ? 'Screenshot added' : 'Screenshot failed', body, silent: true }).show();
+}
+
+/** Capture a screen or window into the recording doc. */
+async function takeShot(sourceId) {
+  const rec = docs.recording();
+  if (!rec) return { ok: false, error: 'Start a recording first' };
+  const shot = await screenshots.capture(sourceId, mainWindow);
+  if (!shot.ok) return shot;
+  return addShotStep(rec, shot.png, shot);
+}
+
+function addShotStep(rec, png, meta) {
+  const step = docs.addShot(rec.docId, png, meta);
+  if (!step) return { ok: false, error: 'Could not save the screenshot' };
+  return { ok: true, stepId: step.id, docName: rec.name, index: docs.get(rec.docId).steps.length };
+}
+
+/** Where a Markdown download puts its images: a folder named after the .md file. */
+function markdownImageDir(mdPath) {
+  return `${path.basename(mdPath).replace(/\.md$/i, '')} images`;
+}
+
 /** Render a doc for download. PDF prints the fully expanded HTML in a hidden window. */
-async function renderDoc(doc, format, mask) {
-  if (format === 'markdown') return Buffer.from(docExport.toMarkdown(doc, { mask }), 'utf8');
-  if (format === 'html') return Buffer.from(docExport.toHtml(doc, { mask }), 'utf8');
+async function renderDoc(doc, format, mask, { imageDir } = {}) {
+  const image = (file) => docs.readShot(file);
+  if (format === 'markdown') return Buffer.from(docExport.toMarkdown(doc, { mask, imageDir }), 'utf8');
+  if (format === 'html') return Buffer.from(docExport.toHtml(doc, { mask, image }), 'utf8');
   if (format === 'postman') return Buffer.from(docExport.toPostman(doc, { mask }), 'utf8');
   if (format === 'pdf') {
-    const html = docExport.toHtml(doc, { mask, expandAll: true });
+    const html = docExport.toHtml(doc, { mask, expandAll: true, image });
     const tmp = path.join(app.getPath('temp'), `hitnrun-doc-${Date.now()}.html`);
     fs.writeFileSync(tmp, html, 'utf8');
     const win = new BrowserWindow({ show: false, webPreferences: { javascript: false } });
@@ -544,12 +615,45 @@ function registerIpc() {
     });
     if (result.canceled || !result.filePath) return { ok: false, canceled: true };
     try {
-      fs.writeFileSync(result.filePath, await renderDoc(doc, format, mask));
-      return { ok: true, path: result.filePath };
+      const withImages = format === 'markdown' && docExport.hasShots(doc);
+      const imageDir = withImages ? markdownImageDir(result.filePath) : null;
+      fs.writeFileSync(result.filePath, await renderDoc(doc, format, mask, { imageDir }));
+      if (withImages) {
+        const dir = path.join(path.dirname(result.filePath), imageDir);
+        fs.mkdirSync(dir, { recursive: true });
+        for (const step of doc.steps) {
+          const from = step.kind === 'shot' && docs.shotPath(step.shot.file);
+          if (from) fs.copyFileSync(from, path.join(dir, docExport.shotFileName(step)));
+        }
+      }
+      return { ok: true, path: result.filePath, imageDir };
     } catch (err) {
       return { ok: false, error: err.message };
     }
   });
+
+  ipcMain.handle('shots:sources', () => screenshots.listSources(mainWindow));
+  ipcMain.handle('shots:take', (_e, sourceId) => takeShot(sourceId));
+  /** Paste an image you copied (Win+Shift+S, Cmd+Ctrl+Shift+4, or from any app) as a step. */
+  ipcMain.handle('shots:paste', () => {
+    const rec = docs.recording();
+    if (!rec) return { ok: false, error: 'Start a recording first' };
+    const img = clipboard.readImage();
+    if (img.isEmpty()) return { ok: false, error: 'There is no image on the clipboard' };
+    const { width, height } = img.getSize();
+    return addShotStep(rec, img.toPNG(), { width, height, source: 'Clipboard' });
+  });
+  ipcMain.handle('shots:copy', (_e, file) => {
+    const full = docs.shotPath(file);
+    if (!full) return false;
+    clipboard.writeImage(nativeImage.createFromPath(full));
+    return true;
+  });
+  ipcMain.handle('shots:open', (_e, file) => {
+    const full = docs.shotPath(file);
+    return full ? shell.openPath(full) : 'Screenshot file is missing';
+  });
+  ipcMain.handle('shots:settings', () => screenshots.openPermissionSettings());
 
   ipcMain.handle('docs:reveal', (_e, filePath) => {
     if (filePath && fs.existsSync(filePath)) shell.showItemInFolder(filePath);

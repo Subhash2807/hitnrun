@@ -41,6 +41,7 @@ export default function App() {
       else if (command === 'tab:close' && active) closeTab(active);
       else if (command === 'tab:next') cycleTab(1);
       else if (command === 'tab:prev') cycleTab(-1);
+      else if (command === 'shot:pick' && useStore.getState().recording) openModal({ type: 'screenshot' });
     });
   }, [createRequest, openModal, closeTab, cycleTab]);
 

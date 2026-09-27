@@ -422,6 +422,20 @@ export const useStore = create((set, get) => ({
     if (rec) get().showToast(`Stopped recording "${rec.name}" — ${rec.stepCount} step${rec.stepCount === 1 ? '' : 's'}`);
   },
 
+  /** Capture a screen or window (id from the picker) into the recording. */
+  async takeShot(sourceId) {
+    const out = await api.shotTake(sourceId);
+    if (out.permission) return get().openModal({ type: 'screenshot' });
+    get().showToast(out.ok ? `Screenshot added as step ${out.index}` : out.error || 'Could not take the screenshot');
+    return out;
+  },
+
+  async pasteShot() {
+    const out = await api.shotPaste();
+    get().showToast(out.ok ? `Pasted image added as step ${out.index}` : out.error);
+    return out;
+  },
+
   /** The "+ Add to doc" button on a response. */
   async addResponseToDoc(requestId) {
     const result = get().responses[requestId];

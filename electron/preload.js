@@ -46,6 +46,12 @@ contextBridge.exposeInMainWorld('api', {
   docsExport: (docId, format, options) => ipcRenderer.invoke('docs:export', docId, format, options),
   docsReveal: (filePath) => ipcRenderer.invoke('docs:reveal', filePath),
   onDocsChanged: (cb) => subscribe('docs:changed', cb),
+  shotSources: () => ipcRenderer.invoke('shots:sources'),
+  shotTake: (sourceId) => ipcRenderer.invoke('shots:take', sourceId),
+  shotPaste: () => ipcRenderer.invoke('shots:paste'),
+  shotCopy: (file) => ipcRenderer.invoke('shots:copy', file),
+  shotOpen: (file) => ipcRenderer.invoke('shots:open', file),
+  shotSettings: () => ipcRenderer.invoke('shots:settings'),
 
   /* code panel / import --------------------------------------------------- */
   codeLanguages: () => ipcRenderer.invoke('code:languages'),

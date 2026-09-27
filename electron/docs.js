@@ -9,6 +9,9 @@
  *
  * One recording at a time. In `auto` mode every send lands in the recording
  * doc; in `manual` mode only the ones you (or Claude) explicitly add.
+ *
+ * Screenshots are steps too (`kind: 'shot'`). Their PNGs live as files in
+ * `doc-assets/` next to docs.json, never inside it, and go when their step does.
  */
 
 const fs = require('node:fs');
@@ -22,6 +25,8 @@ const uid = (prefix) => `${prefix}_${crypto.randomBytes(8).toString('hex')}`;
 const MAX_BODY_CHARS = 2 * 1024 * 1024;
 const STEP_STATUSES = ['untested', 'pass', 'fail'];
 const MODES = ['auto', 'manual'];
+// Only names we generated ever resolve to a file, so a crafted name can't escape the folder.
+const SHOT_FILE = /^shot_[0-9a-f]{16}\.png$/;
 
 const emptyState = () => ({ version: 1, docs: [], recording: null });
 
@@ -29,6 +34,7 @@ class DocStore extends EventEmitter {
   constructor(filePath) {
     super();
     this.filePath = filePath;
+    this.assetsDir = path.join(path.dirname(filePath), 'doc-assets');
     this.state = emptyState();
     this._saveTimer = null;
   }
@@ -41,6 +47,7 @@ class DocStore extends EventEmitter {
         // A recording pointing at a doc that no longer exists is just stale.
         if (this.state.recording && !this.get(this.state.recording.docId)) this.state.recording = null;
       }
+      this.pruneShots();
     } catch (err) {
       try {
         fs.copyFileSync(this.filePath, this.filePath + '.corrupt-' + Date.now());
@@ -125,8 +132,9 @@ class DocStore extends EventEmitter {
   remove(id) {
     const idx = this.state.docs.findIndex((d) => d.id === id);
     if (idx === -1) return false;
-    this.state.docs.splice(idx, 1);
+    const [doc] = this.state.docs.splice(idx, 1);
     if (this.state.recording?.docId === id) this.state.recording = null;
+    for (const step of doc.steps) this._dropShot(step);
     this.touch('doc:delete', id);
     return true;
   }
@@ -140,7 +148,11 @@ class DocStore extends EventEmitter {
     copy.name = `${doc.name} (copy)`;
     copy.createdAt = now;
     copy.updatedAt = now;
-    for (const step of copy.steps) step.id = uid('stp');
+    for (const step of copy.steps) {
+      step.id = uid('stp');
+      // Each doc owns its images, so deleting one copy can't break the other.
+      if (step.kind === 'shot') step.shot.file = this._copyShot(step.shot.file);
+    }
     const idx = this.state.docs.indexOf(doc);
     this.state.docs.splice(idx + 1, 0, copy);
     this.touch('doc:create', copy.id);
@@ -195,6 +207,82 @@ class DocStore extends EventEmitter {
     return step;
   }
 
+    /* ---------------------------------------------------------- screenshots */
+
+  /**
+   * Save a PNG as a new screenshot step at the end of the doc.
+   * @param {Buffer} png
+   * @param {{ title?, source?, width?, height? }} meta  source = the screen or window it came from
+   */
+  addShot(docId, png, meta = {}) {
+    const doc = this.get(docId);
+    if (!doc || !png?.length) return null;
+    const file = `${uid('shot')}.png`;
+    fs.mkdirSync(this.assetsDir, { recursive: true });
+    fs.writeFileSync(path.join(this.assetsDir, file), png);
+    const step = {
+      id: uid('stp'),
+      kind: 'shot',
+      at: Date.now(),
+      source: 'user',
+      title: String(meta.title || '').trim() || `Screenshot${meta.source ? ` — ${meta.source}` : ''}`,
+      note: '',
+      expected: '',
+      status: 'untested',
+      shot: { file, width: meta.width || null, height: meta.height || null, source: meta.source || null, bytes: png.length },
+    };
+    doc.steps.push(step);
+    this.touch('step:add', docId);
+    return step;
+  }
+
+  /** Absolute path of a screenshot file, or null for anything that isn't one of ours. */
+  shotPath(file) {
+    if (!SHOT_FILE.test(String(file || ''))) return null;
+    const full = path.join(this.assetsDir, file);
+    return fs.existsSync(full) ? full : null;
+  }
+
+  readShot(file) {
+    const full = this.shotPath(file);
+    return full ? fs.readFileSync(full) : null;
+  }
+
+  /** Delete image files no step points at (left behind by a crash or an old copy of docs.json). */
+  pruneShots() {
+    let names;
+    try {
+      names = fs.readdirSync(this.assetsDir);
+    } catch {
+      return 0;
+    }
+    const used = new Set();
+    for (const doc of this.state.docs) for (const s of doc.steps) if (s.kind === 'shot') used.add(s.shot?.file);
+    let removed = 0;
+    for (const name of names) {
+      if (SHOT_FILE.test(name) && !used.has(name)) {
+        try {
+          fs.rmSync(path.join(this.assetsDir, name), { force: true });
+          removed++;
+        } catch { /* try again next start */ }
+      }
+    }
+    return removed;
+  }
+
+  _dropShot(step) {
+    const full = step?.kind === 'shot' ? this.shotPath(step.shot?.file) : null;
+    if (full) fs.rm(full, { force: true }, () => {});
+  }
+
+  _copyShot(file) {
+    const from = this.shotPath(file);
+    if (!from) return file;
+    const next = `${uid('shot')}.png`;
+    fs.copyFileSync(from, path.join(this.assetsDir, next));
+    return next;
+  }
+
   /* ---------------------------------------------------------------- steps */
 
   findStep(docId, stepId) {
@@ -219,7 +307,8 @@ class DocStore extends EventEmitter {
     const doc = this.get(docId);
     const idx = doc ? doc.steps.findIndex((s) => s.id === stepId) : -1;
     if (idx === -1) return false;
-    doc.steps.splice(idx, 1);
+    const [step] = doc.steps.splice(idx, 1);
+    this._dropShot(step);
     this.touch('step:delete', docId);
     return true;
   }
@@ -351,4 +440,4 @@ function buildStep(result, meta = {}) {
   };
 }
 
-module.exports = { DocStore, buildStep, summarize, STEP_STATUSES, MAX_BODY_CHARS };
+module.exports = { DocStore, buildStep, summarize, STEP_STATUSES, MAX_BODY_CHARS, SHOT_FILE };

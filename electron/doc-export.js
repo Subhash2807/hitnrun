@@ -7,6 +7,7 @@
  *   Postman   — a v2.1 collection, so the steps can be re-run in order
  *
  * Secrets are masked by default, because the whole point is sharing.
+ * Screenshots can't be masked: they go out exactly as taken.
  */
 
 const crypto = require('node:crypto');
@@ -120,6 +121,7 @@ function maskBody(text, contentType) {
 function maskDoc(doc) {
   const copy = JSON.parse(JSON.stringify(doc));
   for (const step of copy.steps) {
+    if (isShot(step)) continue;
     step.request.url = maskUrl(step.request.url);
     step.request.headers = maskHeaders(step.request.headers);
     step.request.body = maskBody(step.request.body, step.request.bodyContentType);
@@ -132,6 +134,9 @@ function maskDoc(doc) {
 }
 
 /* ---------------------------------------------------------------- helpers */
+
+const isShot = (step) => step.kind === 'shot';
+const hasShots = (doc) => doc.steps.some(isShot);
 
 function pretty(text, contentType) {
   if (text == null) return '';
@@ -198,6 +203,7 @@ function toMarkdown(source, options = {}) {
   if (doc.steps.length) {
     out.push('## Summary', '', '| # | Step | Request | Result | Status |', '|---|---|---|---|---|');
     doc.steps.forEach((s, i) => {
+      if (isShot(s)) return out.push(`| ${i + 1} | ${escCell(s.title)} | 📷 Screenshot | | ${STATUS_ICON[s.status]} |`);
       const result = s.response ? `${s.response.status} · ${s.response.timeMs ?? '?'} ms` : 'Failed';
       out.push(`| ${i + 1} | ${escCell(s.title)} | \`${s.request.method}\` ${escCell(s.request.url)} | ${result} | ${STATUS_ICON[s.status]} |`);
     });
@@ -206,6 +212,7 @@ function toMarkdown(source, options = {}) {
 
   doc.steps.forEach((s, i) => {
     out.push(`## ${i + 1}. ${s.title} ${STATUS_ICON[s.status]}`, '');
+    if (isShot(s)) return out.push(...markdownShot(s, options), '');
     const result = s.response
       ? `**${s.response.status} ${s.response.statusText}** · ${s.response.timeMs ?? '?'} ms · ${fmtBytes(s.response.size)}`
       : `**Failed:** ${s.error}`;
@@ -244,6 +251,24 @@ function toMarkdown(source, options = {}) {
   return out.join('\n');
 }
 
+/** A screenshot links into the images folder written next to the .md (see `shotFileName`). */
+function markdownShot(s, { imageDir } = {}) {
+  const out = [];
+  const meta = [`Taken ${fmtDate(s.at)}`];
+  if (s.shot?.source) meta.push(s.shot.source);
+  out.push(`<sub>${meta.join(' · ')}</sub>`, '');
+  if (s.expected?.trim()) out.push(`**Expected:** ${s.expected.trim()}`, '');
+  if (s.note?.trim()) out.push(`> ${s.note.trim().replace(/\n/g, '\n> ')}`, '');
+  const alt = String(s.title).replace(/[[\]]/g, '');
+  out.push(imageDir ? `![${alt}](<${imageDir}/${shotFileName(s)}>)` : '_Screenshot not included._', '');
+  return out;
+}
+
+/** The name a screenshot gets in an exported images folder: unique per step. */
+function shotFileName(step) {
+  return `${step.id}.png`;
+}
+
 const escCell = (s) => String(s ?? '').replace(/\|/g, '\\|').replace(/\n/g, ' ');
 const headerBlock = (pairs) => fence((pairs || []).map(([k, v]) => `${k}: ${v}`).join('\n') || '(none)', 'http');
 const truncNote = (t) => (t ? '\n\n_Truncated — the full body was larger than the recording limit._' : '');
@@ -266,6 +291,7 @@ const METHOD_COLOR = {
  * @param {object} options
  *   mask      hide secrets (default true)
  *   expandAll open every section — used for PDF, where nothing can be clicked
+ *   image     (file) => Buffer | null, the PNG behind a screenshot step; embedded as data:
  */
 function toHtml(source, options = {}) {
   const doc = prepare(source, options);
@@ -280,8 +306,26 @@ function toHtml(source, options = {}) {
       ? `<table class="kv">${pairs.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(v)}</td></tr>`).join('')}</table>`
       : '<p class="dim">(none)</p>';
 
+  const shotSection = (s, i) => {
+    const meta = [`Taken ${esc(fmtDate(s.at))}`];
+    if (s.shot?.source) meta.push(esc(s.shot.source));
+    const png = options.image ? options.image(s.shot?.file) : null;
+    const parts = [];
+    if (s.expected?.trim()) parts.push(`<p><b>Expected:</b> ${esc(s.expected.trim())}</p>`);
+    if (s.note?.trim()) parts.push(`<blockquote>${esc(s.note.trim()).replace(/\n/g, '<br>')}</blockquote>`);
+    parts.push(png
+      ? `<img class="shot" src="data:image/png;base64,${png.toString('base64')}" alt="${esc(s.title)}">`
+      : '<p class="dim">Screenshot file is missing.</p>');
+    return `<section class="step" id="step-${i + 1}">
+        <h2><span class="num">${i + 1}</span>${esc(s.title)}<span class="status ${s.status}">${STATUS_ICON[s.status]} ${STATUS_WORD[s.status]}</span></h2>
+        <div class="meta">📷 ${meta.join(' · ')}</div>
+        ${parts.join('\n')}
+      </section>`;
+  };
+
   const steps = doc.steps
     .map((s, i) => {
+      if (isShot(s)) return shotSection(s, i);
       const r = s.response;
       const code = r ? `<span class="code ${r.status < 300 ? 'ok' : r.status < 400 ? 'redir' : 'bad'}">${r.status} ${esc(r.statusText)}</span>
           <span class="dim">${r.timeMs ?? '?'} ms · ${fmtBytes(r.size)}</span>`
@@ -317,7 +361,9 @@ function toHtml(source, options = {}) {
     .join('\n');
 
   const summaryRows = doc.steps
-    .map((s, i) => `<tr><td>${i + 1}</td><td><a href="#step-${i + 1}">${esc(s.title)}</a></td><td><b>${esc(s.request.method)}</b> ${esc(s.request.url)}</td><td>${s.response ? `${s.response.status} · ${s.response.timeMs ?? '?'} ms` : 'Failed'}</td><td>${STATUS_ICON[s.status]}</td></tr>`)
+    .map((s, i) => isShot(s)
+      ? `<tr><td>${i + 1}</td><td><a href="#step-${i + 1}">${esc(s.title)}</a></td><td>📷 Screenshot</td><td></td><td>${STATUS_ICON[s.status]}</td></tr>`
+      : `<tr><td>${i + 1}</td><td><a href="#step-${i + 1}">${esc(s.title)}</a></td><td><b>${esc(s.request.method)}</b> ${esc(s.request.url)}</td><td>${s.response ? `${s.response.status} · ${s.response.timeMs ?? '?'} ms` : 'Failed'}</td><td>${STATUS_ICON[s.status]}</td></tr>`)
     .join('');
 
   return `<!doctype html>
@@ -357,6 +403,7 @@ function toHtml(source, options = {}) {
   .kv td { padding: 3px 8px; border-bottom: 1px solid var(--line); font: 12.5px ui-monospace,Consolas,monospace; vertical-align: top; word-break: break-all; }
   .kv td:first-child { width: 32%; color: var(--dim); }
   .tests { padding-left: 18px; margin: 8px 0; }
+  .shot { display: block; margin-top: 10px; max-width: 100%; height: auto; border: 1px solid var(--line); border-radius: 6px; }
   footer { color: var(--dim); font-size: 12px; margin-top: 30px; }
   @media print { pre { max-height: none; } .step { border-color: #ccc; } }
 </style></head>
@@ -382,7 +429,8 @@ const POSTMAN_SCHEMA = 'https://schema.getpostman.com/json/collection/v2.1.0/col
 
 function toPostman(source, options = {}) {
   const doc = prepare(source, options);
-  const item = doc.steps.map((s, i) => {
+  // Postman has nowhere to put an image; numbering still follows the doc.
+  const item = doc.steps.map((s, i) => [s, i]).filter(([s]) => !isShot(s)).map(([s, i]) => {
     const header = (s.request.headers || [])
       // Transport headers the client will add itself.
       .filter(([k]) => !/^(content-length|host|accept-encoding|user-agent)$/i.test(k))
@@ -441,5 +489,5 @@ function safeFileName(name) {
 }
 
 module.exports = {
-  toMarkdown, toHtml, toPostman, maskDoc, maskHeaders, maskUrl, maskBody, maskValue, FORMATS, safeFileName, POSTMAN_SCHEMA,
+  toMarkdown, toHtml, toPostman, maskDoc, hasShots, shotFileName, maskHeaders, maskUrl, maskBody, maskValue, FORMATS, safeFileName, POSTMAN_SCHEMA,
 };

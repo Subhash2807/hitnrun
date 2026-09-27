@@ -58,6 +58,21 @@ request you send is saved in order, with its full response.
 - Find your recordings in the **Docs** tab of the sidebar. Each step has a
   **cURL** button that copies exactly what was sent.
 
+**Screenshots (beta).** Testing in the browser too? While recording, click the
+**camera** in the top bar and pick a screen or window. The screenshot becomes a
+step in the doc, in order with your requests, so you can mark it Pass or Fail
+and add notes like any other step.
+
+- Press `Ctrl+Shift+S` (`Cmd+Shift+S` on a Mac) from any app to capture the
+  screen you're on, without switching to hitnrun.
+- Took one with your system's snipping tool? Use **Paste image** in the
+  screenshot window.
+- Screenshots are included in HTML and PDF downloads. Markdown downloads put
+  them in an images folder next to the `.md` file. They are not masked.
+- **Mac:** allow hitnrun in **System Settings → Privacy & Security → Screen
+  Recording** the first time. After installing a new version you may need to
+  turn it off and on again.
+
 ## Ask AI (beta)
 
 Click **Ask AI** in the top bar (or press `Ctrl+L`) to chat about your APIs.
@@ -103,6 +118,7 @@ and look for `hitnrun`.
 | `Ctrl + Shift + V` | Paste a cURL as a new request |
 | `Ctrl + Shift + C` | Copy as cURL |
 | `Ctrl + L` | Open or close Ask AI |
+| `Ctrl + Shift + S` | Screenshot into the recording (works from any app while recording) |
 | `Ctrl + =` / `Ctrl + -` / `Ctrl + 0` | Zoom in / out / reset |
 
 On a Mac, use `Cmd` instead of `Ctrl`.

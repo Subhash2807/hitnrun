@@ -894,12 +894,17 @@ function presentDoc(doc, fullBodies) {
       : `${text.slice(0, AGENT_BODY_CHARS)}\n...[${text.length - AGENT_BODY_CHARS} more characters — ask with ?bodies=full]`;
   return {
     ...doc,
-    steps: doc.steps.map((s, index) => ({
-      index,
-      ...s,
-      request: { ...s.request, body: cut(s.request.body) },
-      response: s.response ? { ...s.response, body: cut(s.response.body) } : null,
-    })),
+    steps: doc.steps.map((s, index) =>
+      // A screenshot's image stays in the app; the agent gets what it shows in words.
+      s.kind === 'shot'
+        ? { index, ...s, shot: { source: s.shot?.source ?? null, width: s.shot?.width ?? null, height: s.shot?.height ?? null } }
+        : {
+            index,
+            ...s,
+            request: { ...s.request, body: cut(s.request.body) },
+            response: s.response ? { ...s.response, body: cut(s.response.body) } : null,
+          }
+    ),
   };
 }
 
