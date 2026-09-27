@@ -126,7 +126,7 @@ const guard = (fn) => async (args) => {
 const RECORD_HINT =
   'Add this send to the test doc being recorded, even in manual mode. In auto mode every send is recorded anyway.';
 
-const server = new McpServer({ name: 'hitnrun', version: '1.7.0-beta.1' });
+const server = new McpServer({ name: 'hitnrun', version: '1.7.0' });
 
 /* ================================================================ status */
 

@@ -58,7 +58,7 @@ request you send is saved in order, with its full response.
 - Find your recordings in the **Docs** tab of the sidebar. Each step has a
   **cURL** button that copies exactly what was sent.
 
-**Screenshots (beta).** Testing in the browser too? While recording, click the
+**Screenshots.** Testing in the browser too? While recording, click the
 **camera** in the top bar and pick a screen or window. The screenshot becomes a
 step in the doc, in order with your requests, so you can mark it Pass or Fail
 and add notes like any other step.
