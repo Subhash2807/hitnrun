@@ -39,7 +39,8 @@ export default function Editor({
         height={height}
         theme={theme === 'light' ? vscodeLight : vscodeDark}
         extensions={extensions}
-        editable={!readOnly}
+        // Read-only, but still editable in the DOM sense: a non-editable view
+        // can't take focus, which breaks Ctrl/Cmd+F search and click-to-select.
         readOnly={readOnly}
         placeholder={placeholder}
         basicSetup={{

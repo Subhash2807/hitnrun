@@ -23,6 +23,18 @@ The app isn't signed, so your computer will warn you the first time:
 
 Versions ending in `-beta` are previews of new features.
 
+### Updates
+
+hitnrun checks for new versions by itself. When one is out, an **Update** button
+appears at the top of the window: click it, then **Install and restart**. hitnrun
+downloads the update, installs it and opens again, keeping your data. On a Mac
+there's no need to run the `xattr` command again. If hitnrun is installed for all
+users on Windows, you'll be asked for admin permission.
+
+You can also check by hand from **Settings → Check for updates**, or from the menu
+(**hitnrun → Check for Updates…** on Mac, **Help → Check for Updates…** on Windows).
+Full releases only offer full releases; a beta also offers newer betas.
+
 ## What you can do
 
 - **Send any request.** All methods, headers, params, auth, and every kind of body

@@ -4,6 +4,7 @@ import { useStore, api } from '../store.js';
 import KeyValueEditor from './KeyValueEditor.jsx';
 import { IconClose } from './Icons.jsx';
 import { relativeTime } from '../lib/format.js';
+import Markdown from '../lib/markdown.jsx';
 
 export default function Modals() {
   const modal = useStore((s) => s.modal);
@@ -26,6 +27,7 @@ export default function Modals() {
       {modal.type === 'renameDoc' && <RenameDoc id={modal.id} initial={modal.name} />}
       {modal.type === 'exportDoc' && <ExportDocModal id={modal.id} format={modal.format} />}
       {modal.type === 'screenshot' && <ScreenshotModal />}
+      {modal.type === 'update' && <UpdateModal />}
     </Shell>
   );
 }
@@ -1013,6 +1015,8 @@ function SettingsModal() {
         <AiGuardrailsSection settings={settings} />
       </div>
       <div className="modal-foot">
+        <UpdateStatus />
+        <div className="grow" />
         <button className="btn" onClick={closeModal}>Done</button>
       </div>
     </div>
@@ -1110,3 +1114,99 @@ function AiGuardrailsSection({ settings }) {
   );
 }
 
+
+/* --------------------------------------------------------------- updates */
+
+function UpdateModal() {
+  const update = useStore((s) => s.update);
+  const closeModal = useStore((s) => s.closeModal);
+  const showToast = useStore((s) => s.showToast);
+  const latest = update?.latest;
+  if (!latest) {
+    return (
+      <div className="modal" style={{ maxWidth: 460 }}>
+        <Head title="Update hitnrun" />
+        <div className="modal-body"><div className="update-note" style={{ paddingTop: 16 }}>hitnrun {update?.current} is the latest version.</div></div>
+        <div className="modal-foot"><button className="btn" onClick={closeModal}>Close</button></div>
+      </div>
+    );
+  }
+
+  const busy = update.status === 'downloading' || update.status === 'installing';
+  const isMac = navigator.userAgent.includes('Mac');
+  const install = async () => {
+    const out = await api.updateInstall();
+    if (out.openedPage) {
+      showToast('Opened the release page');
+      closeModal();
+    }
+  };
+
+  return (
+    <div className="modal update-modal" style={{ maxWidth: 560 }}>
+      <Head title={`Update to ${latest.version}`} />
+      <div className="modal-body">
+        <div className="update-versions">
+          <span className="mono">{update.current}</span> → <span className="mono">{latest.version}</span>
+          {latest.publishedAt && <span className="dim"> · released {relativeTime(new Date(latest.publishedAt).getTime())}</span>}
+        </div>
+        {latest.notes ? (
+          <div className="update-notes"><Markdown text={latest.notes} /></div>
+        ) : (
+          <div className="update-note">No release notes.</div>
+        )}
+        {busy && (
+          <div className="update-progress">
+            <div className="update-bar"><div style={{ width: `${Math.round(update.progress * 100)}%` }} /></div>
+            <span className="hint">
+              {update.status === 'installing'
+                ? 'Installing — hitnrun will restart by itself.'
+                : `Downloading ${latest.asset?.name || ''}… ${Math.round(update.progress * 100)}%`}
+            </span>
+          </div>
+        )}
+        {update.error && <div className="error-box" style={{ margin: '0 16px 14px' }}>{update.error}</div>}
+        {!busy && update.canInstall && latest.asset && (
+          <div className="update-note">
+            hitnrun downloads the update, closes, installs it and opens again. Your requests, docs and settings stay as they are.
+            {!isMac && ' If hitnrun is installed for all users, Windows asks for admin permission.'}
+          </div>
+        )}
+        {!busy && !(update.canInstall && latest.asset) && (
+          <div className="update-note">
+            This copy can't update itself, so the button opens the release page to download it.
+          </div>
+        )}
+      </div>
+      <div className="modal-foot">
+        <button className="btn btn-ghost" onClick={() => api.openExternal(latest.url)}>Release page</button>
+        <div className="grow" />
+        <button className="btn" onClick={closeModal}>Later</button>
+        <button className="btn btn-primary" disabled={busy} onClick={install}>
+          {busy ? 'Updating…' : update.canInstall && latest.asset ? 'Install and restart' : 'Download'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** Version and a manual check, at the bottom of Settings. */
+function UpdateStatus() {
+  const update = useStore((s) => s.update);
+  const checkForUpdates = useStore((s) => s.checkForUpdates);
+  const [checking, setChecking] = useState(false);
+  if (!update) return null;
+  const check = async () => {
+    setChecking(true);
+    await checkForUpdates();
+    setChecking(false);
+  };
+  return (
+    <span className="hint row" style={{ gap: 10 }}>
+      hitnrun {update.current}
+      <button className="link-btn" disabled={checking} onClick={check}>
+        {checking ? 'Checking…' : 'Check for updates'}
+      </button>
+    </span>
+  );
+}

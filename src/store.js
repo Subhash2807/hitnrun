@@ -69,6 +69,8 @@ export const useStore = create((set, get) => ({
   chatDraft: '',
   toast: null,
   modal: null,
+  // In-app updates: { status, current, latest, progress, error, canInstall }.
+  update: null,
 
   /* ------------------------------------------------------------- lifecycle */
 
@@ -81,6 +83,9 @@ export const useStore = create((set, get) => ({
     api.aiGetState().then((ai) => set({ ai }));
 
     api.onAiChanged((ai) => set({ ai }));
+
+    api.updateState().then((update) => set({ update }));
+    api.onUpdateChanged((update) => set({ update }));
 
     // A deleted doc can't stay open in a tab.
     const closeStaleDocTabs = (docs) => {
@@ -154,6 +159,15 @@ export const useStore = create((set, get) => ({
     setTimeout(() => {
       if (Date.now() - (get().toast?.at ?? 0) >= 2400) set({ toast: null });
     }, 2500);
+  },
+
+  /** From the menu: report the answer, since nothing else would show it. */
+  async checkForUpdates() {
+    const update = await api.updateCheck();
+    set({ update });
+    if (update.status === 'available') get().openModal({ type: 'update' });
+    else if (update.status === 'latest') get().showToast(`hitnrun ${update.current} is the latest version`);
+    else if (update.error) get().showToast(update.error, 'error');
   },
 
   openModal(modal) {
