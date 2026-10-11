@@ -1003,11 +1003,37 @@ input[type='checkbox'] {
 .response-head {
   display: flex;
   align-items: center;
-  gap: 14px;
+  /* When the actions wrap onto a second line, they stay on the right. */
+  justify-content: flex-end;
+  gap: 8px 14px;
   padding: 8px 14px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
   flex-wrap: wrap;
+}
+
+.response-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+}
+
+.open-json {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: transparent;
+  gap: 5px;
+}
+
+.open-json:hover:not(:disabled) {
+  background: var(--accent-dim);
+}
+
+.open-json:disabled {
+  color: var(--text-dim);
+  border-color: var(--border-strong);
 }
 
 .response-title {

@@ -89,8 +89,11 @@ the right.
   there.
 - **Open .json files** from the folder icon in the sidebar, or drop them on the
   viewer. **Save to a file** is in the toolbar.
-- **From a response:** the **{ }** button on a JSON response opens it in the
-  viewer.
+- **From a response:** **Open in JSON Viewer**, next to every response, puts
+  the body on a new page, beautified, and switches to it (`Ctrl+J` takes you
+  back). JSON sent as `text/plain` or with no content type opens too. For HTML,
+  images and other non-JSON bodies the button is greyed out. Clicking it again
+  shows the same page instead of a copy; send again for a new page.
 
 Numbers and text are kept exactly as written, so a long id like
 `12345678901234567890` is never rounded. Files save automatically. Closing a tab

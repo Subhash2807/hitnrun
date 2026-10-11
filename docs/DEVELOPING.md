@@ -221,6 +221,7 @@ electron/
 mcp/server.js        the MCP server
 src/                 the React UI
 src/lib/jsonTree.mjs the JSON viewer's parser and formatter (keeps text positions)
+src/lib/responseJson.mjs which responses open in the JSON viewer, and the page name
 test/                headless tests
 ```
 

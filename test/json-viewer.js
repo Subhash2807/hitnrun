@@ -2,7 +2,8 @@
 
 /**
  * The JSON viewer: its parser, formatter and tree helpers (src/lib/jsonTree.mjs),
- * and the store that keeps its files (electron/json-files.js).
+ * the bridge from a response to a page (src/lib/responseJson.mjs), and the
+ * store that keeps its files (electron/json-files.js).
  *
  * The parser is checked against JSON.parse on thousands of generated and
  * mutated documents: it must accept exactly what JSON.parse accepts, and
@@ -131,6 +132,7 @@ const hasDuplicateKeys = (text, root, keyName) =>
 
 (async () => {
   const J = await import('../src/lib/jsonTree.mjs');
+  const R = await import('../src/lib/responseJson.mjs');
 
   console.log('\nparsing');
 
@@ -490,6 +492,50 @@ const hasDuplicateKeys = (text, root, keyName) =>
     assert.deepEqual(J.lineCol('ab\ncd', 5), { line: 2, column: 3 });
   });
 
+  console.log('\nfrom a response');
+
+  await test('JSON bodies open, whatever the content type says; other bodies say why not', () => {
+    assert.equal(R.notJsonReason('application/json; charset=utf-8', '{"a":1}'), null);
+    assert.equal(R.notJsonReason('application/problem+json', '{"status":404}'), null);
+    assert.equal(R.notJsonReason('application/vnd.api+json', '[]'), null);
+    assert.equal(R.notJsonReason('application/json', '"pong"'), null, 'a scalar is JSON too');
+    assert.equal(R.notJsonReason('application/json', '{"broken":'), null, 'broken JSON opens, so the viewer can show where');
+    assert.equal(R.notJsonReason('text/plain', '  \n {"a":1}'), null, 'JSON sent as text');
+    assert.equal(R.notJsonReason('application/octet-stream', '[1,2]'), null);
+    assert.equal(R.notJsonReason('', '{"a":1}'), null, 'no content type');
+    assert.equal(R.notJsonReason(undefined, '[1]'), null);
+    assert.equal(R.notJsonReason('text/html; charset=utf-8', '<!doctype html>'), 'This response is text/html, not JSON');
+    assert.equal(R.notJsonReason('application/xml', '<a/>'), 'This response is application/xml, not JSON');
+    assert.equal(R.notJsonReason('text/plain', 'hello'), 'This response is text/plain, not JSON');
+    assert.equal(R.notJsonReason('text/plain', '42'), 'This response is text/plain, not JSON', 'a bare number in plain text is just text');
+    assert.equal(R.notJsonReason('', 'hello'), 'This response is not JSON');
+    assert.equal(R.notJsonReason('application/json', ''), 'The response body is empty');
+    assert.equal(R.notJsonReason('application/json', ' \n\t '), 'The response body is empty');
+    assert.equal(R.notJsonReason('text/plain', null), 'The response body is empty');
+    assert.equal(R.notJsonReason('image/png', '\ufffdPNG\r\n\u001a\n\u0000\u0000\u0000\rIHDR'), 'The response body is binary, not JSON');
+    assert.equal(R.notJsonReason('application/json', '{\u0000}'), 'The response body is binary, not JSON');
+    const big = '[' + '1,'.repeat(3_000_000) + '1]';
+    const t0 = Date.now();
+    assert.equal(R.notJsonReason('text/plain', big), null);
+    assert.ok(Date.now() - t0 < 100, 'deciding never parses the body');
+  });
+
+  await test('a page is named after the request, or after what the URL points at', () => {
+    assert.equal(R.responsePageName('Get order', 'https://api.example.com/orders/1042'), 'Get order.json');
+    assert.equal(R.responsePageName('  users.json ', 'https://x.test/'), 'users.json', 'no second .json');
+    assert.equal(R.responsePageName('New Request', 'https://api.example.com/v1/users?page=2'), 'users.json');
+    assert.equal(R.responsePageName('', 'https://api.example.com/orders/1042'), 'orders 1042.json');
+    assert.equal(R.responsePageName(undefined, 'https://api.example.com/users/3f2a9c1e-77b0-4c3e-9d2b-0a6f4f1c8e21'), 'users 3f2a9c1e-77b0-4c3e-9d2b-0a6f4f1c8e21.json');
+    assert.equal(R.responsePageName(null, 'https://api.example.com/feed.json'), 'feed.json');
+    assert.equal(R.responsePageName(null, 'https://api.example.com/v1.2'), 'v1.2.json', 'only a word counts as an extension');
+    assert.equal(R.responsePageName(null, 'https://api.example.com/search/caf%C3%A9'), 'café.json');
+    assert.equal(R.responsePageName(null, 'https://api.example.com/bad/%E0%A4%A'), '%E0%A4%A.json', 'a broken escape is kept as it is');
+    assert.equal(R.responsePageName(null, 'http://127.0.0.1:47600/'), '127.0.0.1.json');
+    assert.equal(R.responsePageName(null, '1042'), 'response.json', 'not a URL');
+    assert.equal(R.responsePageName(null, undefined), 'response.json');
+    assert.equal(R.responsePageName(null, 'https://api.example.com/42'), '42.json', 'an id with nothing before it stays');
+  });
+
   console.log('\nfile store');
 
   await test('new files are numbered, listed newest first, and saved to disk', () => {
@@ -560,6 +606,19 @@ const hasDuplicateKeys = (text, root, keyName) =>
     const again = new JsonFileStore(dir);
     again.load();
     assert.equal(again.list().length, 3);
+  });
+
+  await test('a page from a response gets a name of its own', () => {
+    const store = new JsonFileStore(path.join(tmpDir(), 'json-files'));
+    store.load();
+    const names = ['orders.json', 'orders.json', 'Orders.json', 'orders.json'].map((name) => store.create({ name, unique: true }).name);
+    assert.deepEqual(names, ['orders.json', 'orders 2.json', 'Orders 3.json', 'orders 4.json'], 'names are compared ignoring case');
+    assert.equal(store.create({ name: 'orders.json' }).name, 'orders.json', 'files opened from disk keep their name');
+    assert.equal(store.create({ name: 'notes', unique: true }).name, 'notes');
+    assert.equal(store.create({ name: 'notes', unique: true }).name, 'notes 2');
+    assert.equal(store.create({ name: '  ', unique: true }).name, 'Untitled 1.json');
+    store.remove(store.list().find((f) => f.name === 'orders 2.json').id);
+    assert.equal(store.create({ name: 'orders.json', unique: true }).name, 'orders 2.json', 'a freed number is used again');
   });
 
   await test('bad arguments from the window are shrugged off', () => {

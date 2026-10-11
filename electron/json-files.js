@@ -182,15 +182,19 @@ class JsonFileStore extends EventEmitter {
 
   /* --------------------------------------------------------------- writes */
 
-  /** A new file at the top of the list. Returns its metadata, or null when the text is too big. */
+  /**
+   * A new file at the top of the list. Returns its metadata, or null when the text is too big.
+   * `unique` numbers the name when another file has it already.
+   */
   create(fields) {
-    const { name, content = '' } = fields || {};
+    const { name, content = '', unique = false } = fields || {};
     const text = normalizeText(content);
     if (byteLength(text) > MAX_BYTES) return null;
+    const clean = cleanName(name);
     const now = Date.now();
     const meta = {
       id: uid(),
-      name: cleanName(name) || this.untitledName(),
+      name: !clean ? this.untitledName() : unique ? this.uniqueName(clean) : clean,
       size: byteLength(text),
       createdAt: now,
       updatedAt: now,
@@ -275,6 +279,19 @@ class JsonFileStore extends EventEmitter {
     let candidate = `${base} copy${ext}`;
     for (let n = 2; taken.has(candidate.toLowerCase()); n++) candidate = `${base} copy ${n}${ext}`;
     return candidate;
+  }
+
+  /** "orders.json" while it's free, then "orders 2.json", "orders 3.json"… */
+  uniqueName(name) {
+    const taken = new Set(this.files.map((f) => f.name.toLowerCase()));
+    if (!taken.has(name.toLowerCase())) return name;
+    const dot = name.lastIndexOf('.');
+    const hasExt = dot > 0 && dot >= name.length - 6;
+    const ext = hasExt ? name.slice(dot) : '';
+    const base = hasExt ? name.slice(0, dot) : name;
+    let n = 2;
+    while (taken.has(`${base} ${n}${ext}`.toLowerCase())) n++;
+    return `${base} ${n}${ext}`;
   }
 }
 

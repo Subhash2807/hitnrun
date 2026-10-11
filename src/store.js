@@ -1,5 +1,7 @@
 import { create } from 'zustand';
 import { composeUrl } from './lib/url.js';
+import { beautifyIfValid } from './lib/jsonTree.mjs';
+import { responsePageName } from './lib/responseJson.mjs';
 
 /**
  * Renderer-side store.
@@ -38,6 +40,13 @@ export function registerLiveJson(entry) {
 async function flushLiveJson(id) {
   if (liveJson && (!id || liveJson.id === id)) await liveJson.flush();
 }
+
+/**
+ * The viewer page made from each response, so opening the same response
+ * again shows that page instead of adding a copy. Keyed by the result object:
+ * sending again replaces it, and the new response gets a page of its own.
+ */
+const responsePages = new WeakMap(); // result -> file id, or the promise of the file while it's being made
 
 /** Depth-first walk of every request in the workspace. */
 export function* walkRequests(state) {
@@ -571,6 +580,36 @@ export const useStore = create((set, get) => ({
       return null;
     }
     get().openJsonFile(file.id);
+    return file;
+  },
+
+  /** "Open in JSON Viewer" on a response: its body as a new page, beautified when it's valid. */
+  async openResponseInJson(requestId, text) {
+    const result = get().responses[requestId];
+    if (!result) return null;
+    const made = responsePages.get(result);
+    if (made instanceof Promise) return made; // a click that's still on its way
+    const page = made && get().jsonFiles.find((f) => f.id === made);
+    if (page) {
+      get().openJsonFile(page.id);
+      get().showToast(`This response is already in "${page.name}"`);
+      return page;
+    }
+    const name = responsePageName(get().getRequest(requestId)?.name ?? result.request?.name, result.request?.url);
+    const creating = get().createJsonFile({
+      name,
+      content: beautifyIfValid(text, get().state?.ui?.jsonIndent ?? 2),
+      unique: true,
+    });
+    responsePages.set(result, creating);
+    let file = null;
+    try {
+      file = await creating;
+    } finally {
+      if (file) responsePages.set(result, file.id);
+      else responsePages.delete(result);
+    }
+    if (file) get().showToast(`Opened "${file.name}" — ${navigator.userAgent.includes('Mac') ? 'Cmd' : 'Ctrl'}+J to come back`);
     return file;
   },
 
