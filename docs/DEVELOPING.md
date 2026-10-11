@@ -211,6 +211,7 @@ electron/
   guardrails.js      blocked methods and hosts for AI sends
   sync.js            source cURL syncing
   docs.js            test docs and recording (docs.json)
+  json-files.js      the JSON viewer's files (json-files/, one file each)
   doc-export.js      Markdown / HTML / PDF / Postman export, hides secrets
   codegen.js         cURL / fetch / Python snippets
   postman.js         Postman import
@@ -219,6 +220,7 @@ electron/
   preload.js         the only bridge between the window and Node
 mcp/server.js        the MCP server
 src/                 the React UI
+src/lib/jsonTree.mjs the JSON viewer's parser and formatter (keeps text positions)
 test/                headless tests
 ```
 

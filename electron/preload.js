@@ -53,6 +53,13 @@ contextBridge.exposeInMainWorld('api', {
   shotOpen: (file) => ipcRenderer.invoke('shots:open', file),
   shotSettings: () => ipcRenderer.invoke('shots:settings'),
 
+  /* JSON viewer ----------------------------------------------------------- */
+  json: (method, ...args) => ipcRenderer.invoke('json:call', method, args),
+  jsonOpen: () => ipcRenderer.invoke('json:open'),
+  jsonSave: (id) => ipcRenderer.invoke('json:save', id),
+  jsonFlushSync: (id, content) => ipcRenderer.sendSync('json:flushSync', id, content),
+  onJsonChanged: (cb) => subscribe('json:changed', cb),
+
   /* code panel / import --------------------------------------------------- */
   codeLanguages: () => ipcRenderer.invoke('code:languages'),
   generateCode: (request, options) => ipcRenderer.invoke('code:generate', request, options),

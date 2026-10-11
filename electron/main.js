@@ -19,6 +19,7 @@ const docExport = require('./doc-export');
 const { importPostman } = require('./postman');
 const codegen = require('./codegen');
 const { ChatManager } = require('./chat');
+const { JsonFileStore, exportFileName, MAX_BYTES: MAX_JSON_BYTES } = require('./json-files');
 const { PROVIDERS } = require('./chat-providers');
 const screenshots = require('./screenshots');
 
@@ -36,6 +37,7 @@ let workspace = null;
 let aiWorkspace = null;
 let docs = null;
 let chats = null;
+let jsonFiles = null;
 let controlServer = null;
 let controlStatus = { running: false, port: null, error: null };
 
@@ -155,6 +157,7 @@ function buildMenu() {
       label: 'View',
       submenu: [
         { label: 'AI Assistant (Beta)', accelerator: 'CmdOrCtrl+L', click: emit('chat:toggle') },
+        { label: 'JSON Viewer', accelerator: 'CmdOrCtrl+J', click: emit('view:json') },
         { type: 'separator' },
         { role: 'reload' },
         { role: 'toggleDevTools' },
@@ -285,6 +288,13 @@ app.whenReady().then(async () => {
   chats.on('list', (list) => mainWindow?.webContents.send('chat:list', list));
   chats.on('error', (err) => console.error('[chat]', err));
 
+  jsonFiles = new JsonFileStore(path.join(app.getPath('userData'), 'json-files'));
+  jsonFiles.on('error', (err) => console.error('[json]', err));
+  jsonFiles.load();
+  jsonFiles.on('changed', ({ reason, id }) => {
+    mainWindow?.webContents.send('json:changed', { reason, id, files: jsonFiles.list() });
+  });
+
   // Every mutation — from the UI or from an agent — refreshes the window.
   // Sync states ride along so the indicators never need a second round trip.
   workspace.on('changed', ({ reason, detail, state }) => {
@@ -321,6 +331,7 @@ app.on('before-quit', () => {
   workspace?.saveNow(); // flush any pending debounced write
   aiWorkspace?.saveNow();
   docs?.saveNow();
+  jsonFiles?.saveNow();
   chats?.shutdown();
   controlServer?.stop();
 });
@@ -374,6 +385,9 @@ const ALLOWED_DOC_METHODS = new Set([
   'startRecording', 'setRecording', 'stopRecording',
   'updateStep', 'deleteStep', 'moveStep',
 ]);
+
+// Only these JSON-file methods are reachable from the renderer.
+const ALLOWED_JSON_METHODS = new Set(['list', 'get', 'create', 'update', 'remove', 'duplicate']);
 
 function docsSnapshot() {
   return { docs: docs.list(), recording: docs.recording() };
@@ -678,6 +692,84 @@ function registerIpc() {
     if (!parsed.ok) return parsed;
     workspace.importCollection(parsed.collection);
     return { ok: true, id: parsed.collection.id, name: parsed.collection.name };
+  });
+
+  /* ----------------------------------------------------------- JSON viewer */
+
+  ipcMain.handle('json:call', (_e, method, args = []) => {
+    if (!ALLOWED_JSON_METHODS.has(method)) throw new Error(`JSON file method "${method}" is not exposed to the renderer`);
+    return jsonFiles[method](...args);
+  });
+
+  /** Open .json files from disk as new viewer files. */
+  ipcMain.handle('json:open', async () => {
+    const picked = await dialog.showOpenDialog(mainWindow, {
+      title: 'Open JSON files',
+      properties: ['openFile', 'multiSelections'],
+      filters: [
+        { name: 'JSON', extensions: ['json', 'jsonc', 'geojson', 'har', 'map', 'txt', 'log'] },
+        { name: 'All files', extensions: ['*'] },
+      ],
+    });
+    if (picked.canceled || !picked.filePaths.length) return { ok: false, canceled: true };
+    const files = [];
+    const errors = [];
+    for (const file of picked.filePaths) {
+      const name = path.basename(file);
+      try {
+        if (fs.statSync(file).size > MAX_JSON_BYTES) {
+          errors.push(`${name} is bigger than ${MAX_JSON_BYTES / 1024 / 1024} MB`);
+          continue;
+        }
+        const bytes = fs.readFileSync(file);
+        // A NUL byte early on means an image, archive or the like, not text.
+        if (bytes.subarray(0, 8192).includes(0)) {
+          errors.push(`${name} is not a text file`);
+          continue;
+        }
+        const created = jsonFiles.create({ name, content: bytes.toString('utf8').replace(/^\uFEFF/, '') });
+        if (created) files.push(created);
+        else errors.push(`${name} is too big`);
+      } catch (err) {
+        errors.push(`${name}: ${err.message}`);
+      }
+    }
+    return { ok: files.length > 0, files, errors };
+  });
+
+  /** Save a viewer file to disk. */
+  ipcMain.handle('json:save', async (_e, id) => {
+    const file = jsonFiles.get(id);
+    if (!file) return { ok: false, error: 'File not found' };
+    const result = await dialog.showSaveDialog(mainWindow, {
+      defaultPath: exportFileName(file.name),
+      filters: [
+        { name: 'JSON', extensions: ['json'] },
+        { name: 'All files', extensions: ['*'] },
+      ],
+    });
+    if (result.canceled || !result.filePath) return { ok: false, canceled: true };
+    try {
+      fs.writeFileSync(result.filePath, file.content, 'utf8');
+      return { ok: true, path: result.filePath };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
+  /**
+   * The window is closing with an edit still waiting on its debounce. A
+   * synchronous message is the only kind sure to arrive before it's gone.
+   */
+  ipcMain.on('json:flushSync', (e, id, content) => {
+    try {
+      jsonFiles.update(id, { content });
+      jsonFiles.saveNow();
+      e.returnValue = true;
+    } catch (err) {
+      console.error('[json]', err);
+      e.returnValue = false;
+    }
   });
 
   ipcMain.handle('curl:parse', (_e, text) => parseCurl(text));

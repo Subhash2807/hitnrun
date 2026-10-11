@@ -31,6 +31,13 @@
 
   --row-h: 32px;
   --radius: 4px;
+
+  /* JSON tokens, the same colours as the editor's VS Code theme. */
+  --json-key: #9cdcfe;
+  --json-string: #ce9178;
+  --json-number: #b5cea8;
+  --json-literal: #569cd6;
+  --json-hit: rgba(56, 189, 248, 0.17);
 }
 
 :root[data-theme='light'] {
@@ -50,6 +57,12 @@
   --accent-solid: #0284c7;
   --accent-solid-hover: #0369a1;
   --accent-dim: rgba(2, 132, 199, 0.1);
+
+  --json-key: #0070c1;
+  --json-string: #a31515;
+  --json-number: #098658;
+  --json-literal: #0000ff;
+  --json-hit: rgba(2, 132, 199, 0.13);
 }
 
 * {
@@ -350,6 +363,7 @@ select {
 .tabbar {
   display: flex;
   align-items: stretch;
+  min-height: 37px; /* keeps its height with no tabs open */
   background: var(--bg-raised);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
@@ -2906,4 +2920,484 @@ textarea.editable {
 .shot-permission p {
   margin: 8px 0 12px;
   color: var(--text-dim);
+}
+
+/* ------------------------------------------------------------ JSON viewer */
+
+.view-switch {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-input);
+}
+
+.view-switch button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.view-switch button:hover {
+  color: var(--text);
+}
+
+.view-switch button.active {
+  background: var(--accent-dim);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.json-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 37px;
+  padding: 0 8px 0 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.json-file-icon,
+.json-tab-icon {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.json-workbench {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.json-drop {
+  position: absolute;
+  inset: 8px;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border: 2px dashed var(--accent);
+  border-radius: 10px;
+  background: var(--accent-dim);
+  color: var(--accent);
+  font-size: 14px;
+  font-weight: 600;
+  pointer-events: none;
+}
+
+.json-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 24px;
+  text-align: center;
+  color: var(--text-dim);
+}
+
+.json-empty-mark {
+  width: 54px;
+  height: 54px;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
+.json-empty-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.json-empty p {
+  max-width: 400px;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.json-empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin: 6px 0 10px;
+}
+
+.json-empty-tips {
+  font-size: 11.5px;
+  line-height: 2;
+  color: var(--text-faint);
+}
+
+.json-view {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.json-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.json-indent {
+  margin-left: 4px;
+}
+
+.icon-btn.on {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
+.icon-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+  background: none;
+}
+
+.json-split {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.json-split.resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+
+.json-outline {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  /* However wide it was dragged, the text keeps room when the window narrows. */
+  max-width: calc(100% - 260px);
+  flex-shrink: 0;
+  border-right: 1px solid var(--border);
+  background: var(--bg-raised);
+}
+
+.json-outline-head {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 6px 6px 6px 8px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.json-outline-head .search-box {
+  height: 26px;
+  margin-right: 3px;
+  min-width: 0;
+}
+
+.json-filter-clear {
+  width: 16px;
+  height: 16px;
+}
+
+.json-stale {
+  padding: 6px 10px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--warn);
+  background: rgba(230, 160, 32, 0.1);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.json-filter-count {
+  padding: 4px 10px;
+  font-size: 11px;
+  color: var(--text-faint);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.json-outline-note {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 28px 18px;
+  text-align: center;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--text-faint);
+}
+
+.json-outline-note.error b {
+  color: var(--error);
+}
+
+.json-outline-note.error span {
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  word-break: break-word;
+}
+
+.json-tree {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  outline: none;
+  padding-bottom: 6px;
+}
+
+.json-tree:focus-visible {
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.json-tree.stale {
+  opacity: 0.55;
+}
+
+.json-tree-inner {
+  position: relative;
+  min-width: 100%;
+}
+
+.jt-row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-right: 10px;
+  font-family: var(--mono);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: default;
+  user-select: none;
+}
+
+.jt-row:hover {
+  background: var(--bg-hover);
+}
+
+.jt-row.selected {
+  background: var(--accent-dim);
+}
+
+.json-tree:focus .jt-row.selected {
+  background: var(--json-hit);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.jt-caret {
+  width: 15px;
+  height: 15px;
+  display: grid;
+  place-items: center;
+  border-radius: 3px;
+  color: var(--text-faint);
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.jt-caret.none {
+  cursor: default;
+}
+
+.jt-caret:not(.none):hover {
+  background: var(--bg-active);
+  color: var(--text);
+}
+
+.jt-caret svg {
+  transition: transform 0.1s;
+}
+
+.jt-caret.open svg {
+  transform: rotate(90deg);
+}
+
+.jt-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--text-faint);
+}
+
+.jt-dot.jt-object { background: var(--accent); }
+.jt-dot.jt-array { background: var(--purple); }
+.jt-dot.jt-string { background: var(--json-string); }
+.jt-dot.jt-number { background: var(--json-number); }
+.jt-dot.jt-boolean { background: var(--json-literal); }
+
+.jt-key {
+  color: var(--json-key);
+  flex-shrink: 0;
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.jt-index {
+  color: var(--text-faint);
+  flex-shrink: 0;
+}
+
+.jt-brace {
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+
+.jt-count {
+  color: var(--text-faint);
+  font-family: var(--sans);
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.jt-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: pre;
+}
+
+.jt-value.jt-string { color: var(--json-string); }
+.jt-value.jt-number { color: var(--json-number); }
+.jt-value.jt-boolean { color: var(--json-literal); }
+.jt-value.jt-null { color: var(--json-literal); font-style: italic; }
+
+.jt-row mark {
+  background: rgba(230, 160, 32, 0.38);
+  color: inherit;
+  border-radius: 2px;
+}
+
+.json-raw {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+}
+
+.json-editor {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+}
+
+.json-editor .cm-editor {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  font-size: 12.5px;
+}
+
+.json-editor .cm-scroller {
+  font-family: var(--mono);
+  line-height: 1.6;
+  overflow: auto;
+}
+
+/* The value picked in the outline. */
+.cm-json-node {
+  background: var(--json-hit);
+  border-radius: 2px;
+}
+
+.cm-json-error-line {
+  background: rgba(228, 88, 78, 0.12);
+}
+
+.cm-json-error-mark {
+  background: rgba(228, 88, 78, 0.28);
+  text-decoration: underline wavy var(--error);
+  text-decoration-skip-ink: none;
+  text-underline-offset: 3px;
+}
+
+.cm-json-error-point {
+  display: inline-block;
+  width: 0;
+  height: 1.15em;
+  margin-left: 2px;
+  border-left: 2px solid var(--error);
+  vertical-align: text-bottom;
+}
+
+.json-status {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: 26px;
+  padding: 0 10px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-raised);
+  font-size: 11.5px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  min-width: 0;
+}
+
+.json-ok {
+  color: var(--ok);
+}
+
+.json-err {
+  color: var(--error);
+  font-size: 11.5px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: left;
+}
+
+.json-err:hover {
+  text-decoration: underline;
+}
+
+.json-path {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.json-path code {
+  font-family: var(--mono);
+  color: var(--accent);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.json-status > .dim {
+  flex-shrink: 0;
+}
+
+.json-menu {
+  position: fixed;
+  z-index: 300;
 }

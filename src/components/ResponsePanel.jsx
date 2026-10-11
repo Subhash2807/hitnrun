@@ -1,9 +1,10 @@
 import { useMemo, useState } from 'react';
 import Editor from './Editor.jsx';
-import { IconCopy, IconDownload } from './Icons.jsx';
+import { IconCopy, IconDownload, IconBraces } from './Icons.jsx';
 import { api, useStore } from '../store.js';
 import { AddToDocButton } from './DocsPanel.jsx';
 import { AskAiButton } from './ChatPanel.jsx';
+import { beautifyIfValid } from '../lib/jsonTree.mjs';
 import {
   prettyBytes,
   prettyTime,
@@ -106,6 +107,17 @@ export default function ResponsePanel({ requestId, result, sending, theme }) {
     if (saved) showToast('Saved to ' + saved);
   };
 
+  /** The body as a new file in the JSON viewer, named after the request. */
+  const openInJsonViewer = async () => {
+    const store = useStore.getState();
+    const request = store.getRequest(requestId);
+    const name = request?.name && request.name !== 'New Request'
+      ? `${request.name}.json`
+      : guessFilename(result.request?.url, 'application/json');
+    const created = await store.createJsonFile({ name, content: beautifyIfValid(decoded.text, store.state?.ui?.jsonIndent ?? 2) });
+    if (created) showToast(`Opened in the JSON viewer — ${navigator.userAgent.includes('Mac') ? 'Cmd' : 'Ctrl'}+J to come back`);
+  };
+
   return (
     <div className="pane">
       <div className="response-head">
@@ -121,6 +133,11 @@ export default function ResponsePanel({ requestId, result, sending, theme }) {
         </span>
         <AskAiButton label='Explain' prompt='Explain the last response of the open request, and point out anything unusual.' />
         <AddToDocButton requestId={requestId} />
+        {decoded?.language === 'json' && decoded.text && (
+          <button className="icon-btn" title="Open in the JSON viewer" onClick={openInJsonViewer}>
+            <IconBraces />
+          </button>
+        )}
         <button className="icon-btn" title="Copy response body" onClick={copyBody}>
           <IconCopy />
         </button>

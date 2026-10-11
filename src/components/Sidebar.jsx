@@ -4,6 +4,7 @@ import Dropdown, { Item, Separator } from './Dropdown.jsx';
 import { SyncDot } from './SyncIndicator.jsx';
 import AiWorkspacePanel from './AiWorkspacePanel.jsx';
 import DocsPanel from './DocsPanel.jsx';
+import JsonPanel from './JsonPanel.jsx';
 import {
   IconSearch, IconPlus, IconMore, IconChevronDown, IconChevronRight,
   IconFolder, IconLayers, IconClock, IconTrash, IconCopy, IconSync, IconTerminal,
@@ -14,6 +15,15 @@ export default function Sidebar() {
   const state = useStore((s) => s.state);
   const patchUi = useStore((s) => s.patchUi);
   const hasDocs = useStore((s) => s.docs.length > 0 || !!s.recording);
+
+  if (state?.ui?.view === 'json') {
+    return (
+      <div className="sidebar" style={{ width: state.ui.sidebarWidth || 280 }}>
+        <JsonPanel />
+      </div>
+    );
+  }
+
   // The Docs tab stays out of the way until you have recorded something.
   let tab = state?.ui?.sidebarTab || 'collections';
   if (tab === 'docs' && !hasDocs) tab = 'collections';

@@ -73,6 +73,29 @@ and add notes like any other step.
   Recording** the first time. After installing a new version you may need to
   turn it off and on again.
 
+## View and beautify JSON
+
+Click **JSON** at the top (or press `Ctrl+J`) to switch to the JSON viewer. Each
+file opens in a tab with two panes: the structure on the left, the raw text on
+the right.
+
+- **Add a file** with **+**, then paste your JSON and press **Beautify**
+  (`Ctrl+Shift+F`). **Minify** and **Sort keys** are next to it.
+- **Click anything on the left** to highlight all of it on the right. Move the
+  cursor on the right and the left follows.
+- **Filter** the structure by key or value, and right-click a value to copy it,
+  its path (like `$.items[0].id`) or its key.
+- **Broken JSON?** The status bar says what's wrong and where. Click it to jump
+  there.
+- **Open .json files** from the folder icon in the sidebar, or drop them on the
+  viewer. **Save to a file** is in the toolbar.
+- **From a response:** the **{ }** button on a JSON response opens it in the
+  viewer.
+
+Numbers and text are kept exactly as written, so a long id like
+`12345678901234567890` is never rounded. Files save automatically. Closing a tab
+keeps the file in the sidebar list until you delete it.
+
 ## Ask AI (beta)
 
 Click **Ask AI** in the top bar (or press `Ctrl+L`) to chat about your APIs.
@@ -112,12 +135,14 @@ and look for `hitnrun`.
 | Shortcut | Action |
 |---|---|
 | `Ctrl + Enter` | Send |
-| `Ctrl + N` | New request |
-| `Ctrl + D` | Duplicate request |
+| `Ctrl + N` | New request (a new file in the JSON viewer) |
+| `Ctrl + D` | Duplicate request (or the JSON file) |
 | `Ctrl + W` | Close tab |
 | `Ctrl + Shift + V` | Paste a cURL as a new request |
 | `Ctrl + Shift + C` | Copy as cURL |
 | `Ctrl + L` | Open or close Ask AI |
+| `Ctrl + J` | Switch between requests and the JSON viewer |
+| `Ctrl + Shift + F` | Beautify (in the JSON viewer) |
 | `Ctrl + Shift + S` | Screenshot into the recording (works from any app while recording) |
 | `Ctrl + =` / `Ctrl + -` / `Ctrl + 0` | Zoom in / out / reset |
 

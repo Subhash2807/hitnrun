@@ -24,6 +24,7 @@ export default function Modals() {
       {modal.type === 'aiSetup' && <AiSetupModal />}
       {modal.type === 'startRecording' && <StartRecordingModal docId={modal.docId} />}
       {modal.type === 'renameDoc' && <RenameDoc id={modal.id} initial={modal.name} />}
+      {modal.type === 'renameJson' && <RenameJson id={modal.id} initial={modal.name} />}
       {modal.type === 'exportDoc' && <ExportDocModal id={modal.id} format={modal.format} />}
       {modal.type === 'screenshot' && <ScreenshotModal />}
     </Shell>
@@ -541,6 +542,17 @@ function RenameDoc({ id, initial }) {
     closeModal();
   };
   return <SimpleRename title="Rename doc" value={value} setValue={setValue} submit={submit} close={closeModal} />;
+}
+
+function RenameJson({ id, initial }) {
+  const closeModal = useStore((s) => s.closeModal);
+  const renameJsonFile = useStore((s) => s.renameJsonFile);
+  const [value, setValue] = useState(initial);
+  const submit = async () => {
+    await renameJsonFile(id, value.trim());
+    closeModal();
+  };
+  return <SimpleRename title="Rename file" value={value} setValue={setValue} submit={submit} close={closeModal} />;
 }
 
 export const DOC_FORMATS = [
