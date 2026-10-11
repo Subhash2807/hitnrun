@@ -120,6 +120,29 @@ export function configureJsonView(view, { theme, wrap, onUpdate }) {
 }
 
 /**
+ * Where to scroll so a value can be seen: nowhere if all of it already is,
+ * its middle to the middle when it fits, its first line near the top when it
+ * doesn't. Sideways only its start counts, so a long one-line value doesn't
+ * drag the whole text off to the right.
+ */
+function scrollFor(view, from, to) {
+  const scroller = view.scrollDOM;
+  const height = scroller.clientHeight;
+  const margin = 2 * view.defaultLineHeight;
+  const shownTop = scroller.getBoundingClientRect().top - view.documentTop;
+  const top = view.lineBlockAt(from).top;
+  const bottom = view.lineBlockAt(to).bottom;
+  if (top >= shownTop && bottom <= shownTop + height) {
+    return EditorView.scrollIntoView(from, { y: 'nearest', x: 'nearest' });
+  }
+  if (bottom - top + 2 * margin <= height) {
+    const middle = view.lineBlockAtHeight((top + bottom) / 2).from;
+    return EditorView.scrollIntoView(middle, { y: 'center', x: 'nearest' });
+  }
+  return EditorView.scrollIntoView(from, { y: 'start', yMargin: margin, x: 'nearest' });
+}
+
+/**
  * Show a value from the tree: scroll to it, open any fold hiding its start,
  * and either highlight it (the tree keeps focus) or select it (the editor
  * takes focus, so it can be copied or typed over).
@@ -130,8 +153,7 @@ export function revealRange(view, from, to, { select = false } = {}) {
     if (a < from && from < b) effects.push(unfoldEffect.of({ from: a, to: b }));
   });
   effects.push(setNodeHighlight.of(select ? null : { from, to }));
-  // Head at the start, so a value taller than the pane shows its first line.
-  effects.push(EditorView.scrollIntoView(EditorSelection.range(to, from), { y: 'nearest', yMargin: 48 }));
+  effects.push(scrollFor(view, from, to));
   view.dispatch({
     selection: select ? EditorSelection.range(from, to) : EditorSelection.cursor(from),
     effects,
