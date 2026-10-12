@@ -81,6 +81,12 @@ contextBridge.exposeInMainWorld('api', {
   readClipboard: () => ipcRenderer.invoke('clipboard:read'),
   openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
 
+  /* updates ------------------------------------------------------------- */
+  updateState: () => ipcRenderer.invoke('update:state'),
+  updateCheck: () => ipcRenderer.invoke('update:check'),
+  updateInstall: () => ipcRenderer.invoke('update:install'),
+  onUpdateChanged: (cb) => subscribe('update:changed', cb),
+
   /* control server -------------------------------------------------------- */
   controlStatus: () => ipcRenderer.invoke('control:status'),
   controlRestart: (config) => ipcRenderer.invoke('control:restart', config),

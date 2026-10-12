@@ -7,7 +7,7 @@ import DocView from './components/DocView.jsx';
 import { RecordControl } from './components/DocsPanel.jsx';
 import ChatPanel, { ChatToggle } from './components/ChatPanel.jsx';
 import Dropdown, { Item, Separator } from './components/Dropdown.jsx';
-import { IconPlus, IconClose, IconSettings, IconChevronDown, IconSync, IconDoc } from './components/Icons.jsx';
+import { IconPlus, IconClose, IconSettings, IconChevronDown, IconSync, IconDoc, IconDownload } from './components/Icons.jsx';
 import { METHOD_COLORS } from './lib/format.js';
 
 export default function App() {
@@ -41,6 +41,7 @@ export default function App() {
       else if (command === 'tab:close' && active) closeTab(active);
       else if (command === 'tab:next') cycleTab(1);
       else if (command === 'tab:prev') cycleTab(-1);
+      else if (command === 'update:check') useStore.getState().checkForUpdates();
       else if (command === 'shot:pick' && useStore.getState().recording) openModal({ type: 'screenshot' });
     });
   }, [createRequest, openModal, closeTab, cycleTab]);
@@ -100,6 +101,8 @@ function TopBar() {
 
       <div className="topbar-spacer" />
 
+      <UpdateButton />
+
       <RecordControl />
 
       <ChatToggle />
@@ -158,6 +161,26 @@ function TopBar() {
         <IconSettings />
       </button>
     </div>
+  );
+}
+
+/** Shown only once a newer version is out. */
+function UpdateButton() {
+  const update = useStore((s) => s.update);
+  const openModal = useStore((s) => s.openModal);
+  if (!update?.latest || !['available', 'downloading', 'installing', 'error'].includes(update.status)) return null;
+  const busy = update.status === 'downloading' || update.status === 'installing';
+  return (
+    <button
+      className="update-btn"
+      title={`hitnrun ${update.latest.version} is available`}
+      onClick={() => openModal({ type: 'update' })}
+    >
+      <IconDownload width={13} height={13} />
+      {busy
+        ? update.status === 'installing' ? 'Installing…' : `Updating ${Math.round(update.progress * 100)}%`
+        : `Update to ${update.latest.version}`}
+    </button>
   );
 }
 

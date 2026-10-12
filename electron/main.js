@@ -21,6 +21,7 @@ const codegen = require('./codegen');
 const { ChatManager } = require('./chat');
 const { PROVIDERS } = require('./chat-providers');
 const screenshots = require('./screenshots');
+const { Updater } = require('./updater');
 
 // Screenshot steps are shown from their files through this scheme, so the page
 // never needs file:// access. Must be declared before the app is ready.
@@ -36,6 +37,7 @@ let workspace = null;
 let aiWorkspace = null;
 let docs = null;
 let chats = null;
+let updater = null;
 let controlServer = null;
 let controlStatus = { running: false, port: null, error: null };
 
@@ -124,9 +126,26 @@ function zoomBy(delta) {
 function buildMenu() {
   const isMac = process.platform === 'darwin';
   const emit = (command) => () => mainWindow?.webContents.send('menu:command', command);
+  const checkUpdates = { label: 'Check for Updates…', click: emit('update:check') };
 
   const template = [
-    ...(isMac ? [{ role: 'appMenu' }] : []),
+    ...(isMac
+      ? [{
+        label: app.name,
+        submenu: [
+          { role: 'about' },
+          checkUpdates,
+          { type: 'separator' },
+          { role: 'services' },
+          { type: 'separator' },
+          { role: 'hide' },
+          { role: 'hideOthers' },
+          { role: 'unhide' },
+          { type: 'separator' },
+          { role: 'quit' },
+        ],
+      }]
+      : []),
     {
       label: 'File',
       submenu: [
@@ -168,6 +187,7 @@ function buildMenu() {
       ],
     },
     { role: 'windowMenu' },
+    ...(isMac ? [] : [{ label: 'Help', submenu: [checkUpdates] }]),
   ];
 
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
@@ -302,11 +322,15 @@ app.whenReady().then(async () => {
     return full ? net.fetch(pathToFileURL(full).href) : new Response('Not found', { status: 404 });
   });
 
+  updater = new Updater({ app, fetch: net.fetch, shell });
+  updater.on('changed', (state) => mainWindow?.webContents.send('update:changed', state));
+
   registerIpc();
   syncShotShortcut();
   buildMenu();
   createWindow();
   await startControlServer();
+  updater.start();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -502,6 +526,10 @@ function syncRequests(requests) {
 
 function registerIpc() {
   ipcMain.handle('ws:getState', () => workspace.getState());
+
+  ipcMain.handle('update:state', () => updater.getState());
+  ipcMain.handle('update:check', () => updater.check({ manual: true }));
+  ipcMain.handle('update:install', () => updater.install());
   ipcMain.handle('sync:states', () => computeSyncStates());
 
   ipcMain.handle('sync:setSource', (_e, envId, curlText) => {
