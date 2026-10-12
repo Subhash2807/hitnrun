@@ -188,3 +188,25 @@ export const IconCamera = make(
     <circle cx="12" cy="13" r="4" />
   </>
 );
+/** JSON: a pair of curly braces. */
+export const IconBraces = make(
+  <>
+    <path d="M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5a2 2 0 0 0 2 2h1" />
+    <path d="M16 21h1a2 2 0 0 0 2-2v-5a2 2 0 0 1 2-2 2 2 0 0 1-2-2V5a2 2 0 0 0-2-2h-1" />
+  </>
+);
+export const IconExpandAll = make(
+  <>
+    <polyline points="7 15 12 20 17 15" />
+    <polyline points="7 9 12 4 17 9" />
+  </>
+);
+export const IconCollapseAll = make(
+  <>
+    <polyline points="7 20 12 15 17 20" />
+    <polyline points="7 4 12 9 17 4" />
+  </>
+);
+export const IconFolderOpen = make(
+  <path d="M6 14l1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2" />
+);

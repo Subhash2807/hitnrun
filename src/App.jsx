@@ -6,8 +6,9 @@ import Modals from './components/Modals.jsx';
 import DocView from './components/DocView.jsx';
 import { RecordControl } from './components/DocsPanel.jsx';
 import ChatPanel, { ChatToggle } from './components/ChatPanel.jsx';
+import JsonWorkbench from './components/JsonView.jsx';
 import Dropdown, { Item, Separator } from './components/Dropdown.jsx';
-import { IconPlus, IconClose, IconSettings, IconChevronDown, IconSync, IconDoc, IconDownload } from './components/Icons.jsx';
+import { IconPlus, IconClose, IconSettings, IconChevronDown, IconSync, IconDoc, IconDownload, IconBraces } from './components/Icons.jsx';
 import { METHOD_COLORS } from './lib/format.js';
 
 export default function App() {
@@ -33,18 +34,43 @@ export default function App() {
 
   useEffect(() => {
     return api.onMenuCommand((command) => {
-      const active = useStore.getState().state?.ui?.activeTabId;
-      if (command === 'request:new') createRequest(useStore.getState().state?.collections?.[0]?.id);
+      const store = useStore.getState();
+      const ui = store.state?.ui;
+      const active = ui?.activeTabId;
+      // In the JSON viewer, new / close / next tab / duplicate act on its files.
+      if (ui?.view === 'json') {
+        if (command === 'request:new') return store.createJsonFile();
+        if (command === 'tab:close') return ui.jsonActiveId && store.closeJsonTab(ui.jsonActiveId);
+        if (command === 'tab:next') return store.cycleJsonTab(1);
+        if (command === 'tab:prev') return store.cycleJsonTab(-1);
+        if (command === 'request:duplicate') return ui.jsonActiveId && store.duplicateJsonFile(ui.jsonActiveId);
+      }
+      if (command === 'request:new') createRequest(store.state?.collections?.[0]?.id);
       else if (command === 'collection:new') openModal({ type: 'newCollection' });
-      else if (command === 'collection:import') useStore.getState().importPostman();
-      else if (command === 'chat:toggle') useStore.getState().toggleChat();
+      else if (command === 'collection:import') store.importPostman();
+      else if (command === 'chat:toggle') store.toggleChat();
+      else if (command === 'view:json') store.toggleView();
       else if (command === 'tab:close' && active) closeTab(active);
       else if (command === 'tab:next') cycleTab(1);
       else if (command === 'tab:prev') cycleTab(-1);
-      else if (command === 'update:check') useStore.getState().checkForUpdates();
-      else if (command === 'shot:pick' && useStore.getState().recording) openModal({ type: 'screenshot' });
+      else if (command === 'update:check') store.checkForUpdates();
+      else if (command === 'shot:pick' && store.recording) openModal({ type: 'screenshot' });
     });
   }, [createRequest, openModal, closeTab, cycleTab]);
+
+  // A file dropped anywhere else would make the window navigate to it and
+  // replace the app. The JSON viewer takes drops itself before this runs.
+  useEffect(() => {
+    const block = (e) => {
+      if ([...(e.dataTransfer?.types || [])].includes('Files')) e.preventDefault();
+    };
+    window.addEventListener('dragover', block);
+    window.addEventListener('drop', block);
+    return () => {
+      window.removeEventListener('dragover', block);
+      window.removeEventListener('drop', block);
+    };
+  }, []);
 
   if (!ready || !state) {
     return (
@@ -63,14 +89,20 @@ export default function App() {
         <Sidebar />
         <SidebarResizer />
         <div className="main">
-          <TabBar />
-          {activeTabId?.startsWith('doc_') ? (
-            <DocView key={activeTabId} docId={activeTabId} />
-          ) : activeTabId ? (
-            // Keyed so switching tabs resets per-request local UI state.
-            <RequestView key={activeTabId} requestId={activeTabId} theme={theme} />
+          {state.ui.view === 'json' ? (
+            <JsonWorkbench theme={theme} />
           ) : (
-            <EmptyState />
+            <>
+              <TabBar />
+              {activeTabId?.startsWith('doc_') ? (
+                <DocView key={activeTabId} docId={activeTabId} />
+              ) : activeTabId ? (
+                // Keyed so switching tabs resets per-request local UI state.
+                <RequestView key={activeTabId} requestId={activeTabId} theme={theme} />
+              ) : (
+                <EmptyState />
+              )}
+            </>
           )}
         </div>
         {state.ui.chatOpen && <ChatPanel />}
@@ -98,6 +130,8 @@ function TopBar() {
         <span className="brand-mark">H</span>
         hitnrun
       </div>
+
+      <ViewSwitch />
 
       <div className="topbar-spacer" />
 
@@ -181,6 +215,35 @@ function UpdateButton() {
         ? update.status === 'installing' ? 'Installing…' : `Updating ${Math.round(update.progress * 100)}%`
         : `Update to ${update.latest.version}`}
     </button>
+  );
+}
+
+/** Requests or the JSON viewer: the two halves of the app. */
+function ViewSwitch() {
+  const view = useStore((s) => s.state?.ui?.view || 'requests');
+  const setView = useStore((s) => s.setView);
+  const mod = navigator.userAgent.includes('Mac') ? 'Cmd' : 'Ctrl';
+  return (
+    <div className="view-switch" role="tablist" aria-label="View">
+      <button
+        role="tab"
+        aria-selected={view === 'requests'}
+        className={view === 'requests' ? 'active' : ''}
+        title={`Requests (${mod}+J switches)`}
+        onClick={() => setView('requests')}
+      >
+        Requests
+      </button>
+      <button
+        role="tab"
+        aria-selected={view === 'json'}
+        className={view === 'json' ? 'active' : ''}
+        title={`JSON viewer: beautify JSON and explore it as a tree (${mod}+J)`}
+        onClick={() => setView('json')}
+      >
+        <IconBraces width={12} height={12} /> JSON
+      </button>
+    </div>
   );
 }
 

@@ -1,5 +1,7 @@
 import { create } from 'zustand';
 import { composeUrl } from './lib/url.js';
+import { beautifyIfValid } from './lib/jsonTree.mjs';
+import { responsePageName } from './lib/responseJson.mjs';
 
 /**
  * Renderer-side store.
@@ -17,6 +19,34 @@ import { composeUrl } from './lib/url.js';
 const api = window.api;
 const SAVE_DEBOUNCE_MS = 300;
 const saveTimers = new Map();
+// Mirrors MAX_BYTES in electron/json-files.js.
+const JSON_MAX_BYTES = 50 * 1024 * 1024;
+
+/**
+ * The JSON file open in the viewer registers here. Its text lives in the
+ * editor and is saved on a debounce, so anything that reads the file back
+ * from the main process (duplicate, save to disk, the chat context) asks it to
+ * write out first.
+ */
+let liveJson = null; // { id, flush: () => Promise, head: (max) => string, length: () => number }
+
+export function registerLiveJson(entry) {
+  liveJson = entry;
+  return () => {
+    if (liveJson === entry) liveJson = null;
+  };
+}
+
+async function flushLiveJson(id) {
+  if (liveJson && (!id || liveJson.id === id)) await liveJson.flush();
+}
+
+/**
+ * The viewer page made from each response, so opening the same response
+ * again shows that page instead of adding a copy. Keyed by the result object:
+ * sending again replaces it, and the new response gets a page of its own.
+ */
+const responsePages = new WeakMap(); // result -> file id, or the promise of the file while it's being made
 
 /** Depth-first walk of every request in the workspace. */
 export function* walkRequests(state) {
@@ -67,6 +97,9 @@ export const useStore = create((set, get) => ({
   chatProviders: [],
   chatDetected: null,
   chatDraft: '',
+  // JSON viewer: the files (names and sizes, no text), once loaded.
+  jsonFiles: [],
+  jsonLoaded: false,
   toast: null,
   modal: null,
   // In-app updates: { status, current, latest, progress, error, canInstall }.
@@ -106,6 +139,29 @@ export const useStore = create((set, get) => ({
       closeStaleDocTabs(docs);
     });
 
+    // A deleted JSON file can't stay open either.
+    const closeStaleJsonTabs = (files) => {
+      const ui = get().state?.ui;
+      const tabs = ui?.jsonTabs || [];
+      const known = new Set(files.map((f) => f.id));
+      if (tabs.every((t) => known.has(t))) return;
+      const kept = tabs.filter((t) => known.has(t));
+      let active = ui.jsonActiveId;
+      if (!kept.includes(active)) {
+        const idx = Math.max(0, tabs.indexOf(active));
+        active = kept[Math.min(idx, kept.length - 1)] ?? null;
+      }
+      get().patchUi({ jsonTabs: kept, jsonActiveId: active });
+    };
+    api.json('list').then((files) => {
+      set({ jsonFiles: files, jsonLoaded: true });
+      closeStaleJsonTabs(files);
+    });
+    api.onJsonChanged(({ files }) => {
+      set({ jsonFiles: files, jsonLoaded: true });
+      closeStaleJsonTabs(files);
+    });
+
     api.onWorkspaceChanged(({ state: next, syncStates }) => {
       if (syncStates) set({ syncStates });
       const { pending, drafts } = get();
@@ -129,7 +185,7 @@ export const useStore = create((set, get) => ({
           get().openTab(event.requestId);
         } else {
           // The AI's own requests live in the AI tab, not in a request tab.
-          get().patchUi({ sidebarTab: 'ai' });
+          get().patchUi({ sidebarTab: 'ai', view: 'requests' });
           get().showToast('Claude wants you to look at something in the AI tab');
         }
       } else if (event.type === 'request:updated') {
@@ -275,7 +331,9 @@ export const useStore = create((set, get) => ({
     const ui = get().state?.ui;
     if (!ui || typeof requestId !== 'string') return;
     const tabs = ui.tabs.includes(requestId) ? ui.tabs : [...ui.tabs, requestId];
-    get().patchUi({ tabs, activeTabId: requestId });
+    // Opening a request or doc (from the AI, a recording, a shortcut) brings
+    // you back from the JSON viewer, or you would never see it open.
+    get().patchUi({ tabs, activeTabId: requestId, ...(ui.view === 'json' ? { view: 'requests' } : {}) });
   },
 
   async closeTab(requestId, { skipFlush = false } = {}) {
@@ -485,8 +543,151 @@ export const useStore = create((set, get) => ({
       return out;
     }
     await get().refresh();
-    get().patchUi({ sidebarTab: 'collections' });
+    get().patchUi({ sidebarTab: 'collections', view: 'requests' });
     get().showToast(`Imported "${out.name}"`);
+    return out;
+  },
+
+  /* ------------------------------------------------------- JSON viewer */
+
+  /** 'requests' or 'json': which half of the app fills the window. */
+  setView(view) {
+    if (get().state?.ui?.view !== view) get().patchUi({ view });
+  },
+
+  toggleView() {
+    get().setView(get().state?.ui?.view === 'json' ? 'requests' : 'json');
+  },
+
+  openJsonFile(id) {
+    const ui = get().state?.ui;
+    if (!ui || typeof id !== 'string') return;
+    const tabs = ui.jsonTabs || [];
+    get().patchUi({ view: 'json', jsonTabs: tabs.includes(id) ? tabs : [...tabs, id], jsonActiveId: id });
+  },
+
+  /** Close a file's tab. The file itself stays in the list. */
+  async closeJsonTab(id) {
+    await flushLiveJson(id);
+    const ui = get().state?.ui;
+    if (!ui) return;
+    const tabs = ui.jsonTabs || [];
+    const kept = tabs.filter((t) => t !== id);
+    let active = ui.jsonActiveId;
+    if (active === id) active = kept[Math.min(tabs.indexOf(id), kept.length - 1)] ?? null;
+    get().patchUi({ jsonTabs: kept, jsonActiveId: active });
+  },
+
+  cycleJsonTab(direction) {
+    const ui = get().state?.ui;
+    const tabs = ui?.jsonTabs || [];
+    if (tabs.length < 2) return;
+    const idx = tabs.indexOf(ui.jsonActiveId);
+    get().patchUi({ jsonActiveId: tabs[(idx + direction + tabs.length) % tabs.length] });
+  },
+
+  /** A new file, opened in a tab. `fields` may carry a name and content. */
+  async createJsonFile(fields = {}) {
+    const file = await api.json('create', fields);
+    if (!file) {
+      get().showToast('That is too big to open — the limit is 50 MB');
+      return null;
+    }
+    get().openJsonFile(file.id);
+    return file;
+  },
+
+  /** "Open in JSON Viewer" on a response: its body as a new page, beautified when it's valid. */
+  async openResponseInJson(requestId, text) {
+    const result = get().responses[requestId];
+    if (!result) return null;
+    const made = responsePages.get(result);
+    if (made instanceof Promise) return made; // a click that's still on its way
+    const page = made && get().jsonFiles.find((f) => f.id === made);
+    if (page) {
+      get().openJsonFile(page.id);
+      get().showToast(`This response is already in "${page.name}"`);
+      return page;
+    }
+    const name = responsePageName(get().getRequest(requestId)?.name ?? result.request?.name, result.request?.url);
+    const creating = get().createJsonFile({
+      name,
+      content: beautifyIfValid(text, get().state?.ui?.jsonIndent ?? 2),
+      unique: true,
+    });
+    responsePages.set(result, creating);
+    let file = null;
+    try {
+      file = await creating;
+    } finally {
+      if (file) responsePages.set(result, file.id);
+      else responsePages.delete(result);
+    }
+    if (file) get().showToast(`Opened "${file.name}" — ${navigator.userAgent.includes('Mac') ? 'Cmd' : 'Ctrl'}+J to come back`);
+    return file;
+  },
+
+  /** File → open .json files from disk. */
+  async importJsonFiles() {
+    const out = await api.jsonOpen();
+    if (out.canceled) return out;
+    for (const file of out.files || []) get().openJsonFile(file.id);
+    if (out.errors?.length) get().showToast(out.errors.length === 1 ? out.errors[0] : `${out.errors.length} files could not be opened: ${out.errors[0]}`);
+    else if (out.files?.length > 1) get().showToast(`Opened ${out.files.length} files`);
+    return out;
+  },
+
+  /** Files dropped on the viewer. */
+  async addDroppedJsonFiles(fileList) {
+    const opened = [];
+    const errors = [];
+    for (const file of fileList) {
+      if (file.size > JSON_MAX_BYTES) {
+        errors.push(`${file.name} is bigger than 50 MB`);
+        continue;
+      }
+      let text;
+      try {
+        text = await file.text();
+      } catch (err) {
+        errors.push(`${file.name}: ${err.message}`);
+        continue;
+      }
+      if (text.slice(0, 8192).includes('\u0000')) {
+        errors.push(`${file.name} is not a text file`);
+        continue;
+      }
+      const created = await get().createJsonFile({ name: file.name, content: text.replace(/^\uFEFF/, '') });
+      if (created) opened.push(created);
+    }
+    if (errors.length) get().showToast(errors[0]);
+    else if (opened.length > 1) get().showToast(`Opened ${opened.length} files`);
+  },
+
+  async renameJsonFile(id, name) {
+    if (name?.trim()) await api.json('update', id, { name });
+  },
+
+  async duplicateJsonFile(id) {
+    await flushLiveJson(id);
+    const copy = await api.json('duplicate', id);
+    if (copy) {
+      get().openJsonFile(copy.id);
+      get().showToast(`Duplicated as "${copy.name}"`);
+    }
+    return copy;
+  },
+
+  async deleteJsonFile(id) {
+    await api.json('remove', id);
+  },
+
+  /** Save a copy of a file to disk. */
+  async saveJsonToDisk(id) {
+    await flushLiveJson(id);
+    const out = await api.jsonSave(id);
+    if (out.canceled) return out;
+    get().showToast(out.ok ? `Saved ${out.path.split(/[\\/]/).pop()}` : out.error || 'Could not save the file');
     return out;
   },
 
@@ -574,6 +775,7 @@ export const useStore = create((set, get) => ({
   /** Describe what is open in the app, so "why is this failing?" needs no pasting. */
   chatContext() {
     const { state, responses } = get();
+    if (state?.ui?.view === 'json') return get().jsonChatContext();
     const active = state?.ui?.activeTabId;
     if (!active) return null;
     const env = state.environments.find((e) => e.id === state.activeEnvironmentId);
@@ -616,6 +818,31 @@ ${request.body.raw.slice(0, 2000)}`);
     }
     if (env) lines.push(`Active environment: ${env.name}`);
     return { label, text: `<hitnrun-context>\n${lines.join('\n')}\n</hitnrun-context>` };
+  },
+
+  /**
+   * The JSON file on screen, for the chat. The chat panel asks for the label
+   * on every store change, so the text is only read when a message is sent.
+   */
+  jsonChatContext() {
+    const id = get().state?.ui?.jsonActiveId;
+    const file = id && get().jsonFiles.find((f) => f.id === id);
+    if (!file) return null;
+    const live = liveJson?.id === id ? liveJson : null;
+    return {
+      label: file.name,
+      get text() {
+        const length = live ? live.length() : 0;
+        const head = live ? live.head(6000) : '';
+        const lines = [`Open in hitnrun's JSON viewer: "${file.name}".`];
+        if (head.trim()) {
+          lines.push(`Its content${length > 6000 ? ` (the first 6000 of ${length} characters)` : ''}:\n${head}`);
+        } else {
+          lines.push('The file is empty.');
+        }
+        return `<hitnrun-context>\n${lines.join('\n')}\n</hitnrun-context>`;
+      },
+    };
   },
 
   async sendChat(text, { includeContext = true } = {}) {

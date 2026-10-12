@@ -490,7 +490,7 @@ function Composer({ disabled, running }) {
       {contextLabel && (
         <button
           className={`chat-context-chip ${withContext ? 'on' : ''}`}
-          title={withContext ? 'The open request and its last response are sent with your message. Click to leave them out.' : 'Click to include the open request'}
+          title={withContext ? 'What you have open (a request and its last response, or a JSON file) is sent with your message. Click to leave it out.' : 'Click to include what you have open'}
           onClick={() => setWithContext((v) => !v)}
         >
           {withContext ? '✓' : '+'} {contextLabel}

@@ -1,9 +1,10 @@
 import { useMemo, useState } from 'react';
 import Editor from './Editor.jsx';
-import { IconCopy, IconDownload } from './Icons.jsx';
+import { IconCopy, IconDownload, IconBraces } from './Icons.jsx';
 import { api, useStore } from '../store.js';
 import { AddToDocButton } from './DocsPanel.jsx';
 import { AskAiButton } from './ChatPanel.jsx';
+import { notJsonReason } from '../lib/responseJson.mjs';
 import {
   prettyBytes,
   prettyTime,
@@ -37,6 +38,8 @@ export default function ResponsePanel({ requestId, result, sending, theme }) {
   }, [response]);
 
   const cookies = useMemo(() => parseCookies(response?.headers), [response]);
+  const jsonProblem = useMemo(() => decoded && notJsonReason(decoded.contentType, decoded.text), [decoded]);
+  const [openingJson, setOpeningJson] = useState(false);
 
   if (sending) {
     return (
@@ -106,6 +109,20 @@ export default function ResponsePanel({ requestId, result, sending, theme }) {
     if (saved) showToast('Saved to ' + saved);
   };
 
+  /** The body as a new page in the JSON viewer, which the app then switches to. */
+  const openInJsonViewer = async () => {
+    // A big body takes a moment to beautify; say so before the work starts.
+    if (decoded.text.length > 1_000_000) {
+      setOpeningJson(true);
+      await nextPaint();
+    }
+    try {
+      await useStore.getState().openResponseInJson(requestId, decoded.text);
+    } finally {
+      setOpeningJson(false);
+    }
+  };
+
   return (
     <div className="pane">
       <div className="response-head">
@@ -119,14 +136,25 @@ export default function ResponsePanel({ requestId, result, sending, theme }) {
         <span className="stat">
           Size <b>{prettyBytes(response.size?.decoded)}</b>
         </span>
-        <AskAiButton label='Explain' prompt='Explain the last response of the open request, and point out anything unusual.' />
-        <AddToDocButton requestId={requestId} />
-        <button className="icon-btn" title="Copy response body" onClick={copyBody}>
-          <IconCopy />
-        </button>
-        <button className="icon-btn" title="Save response to file" onClick={saveBody}>
-          <IconDownload />
-        </button>
+        {/* Grouped so that in a narrow pane they wrap onto a line of their own together. */}
+        <div className="response-actions">
+          <AskAiButton label='Explain' prompt='Explain the last response of the open request, and point out anything unusual.' />
+          <AddToDocButton requestId={requestId} />
+          <button
+            className="btn btn-sm open-json"
+            disabled={!!jsonProblem || openingJson}
+            title={jsonProblem || 'Open this response as a new page in the JSON viewer'}
+            onClick={openInJsonViewer}
+          >
+            <IconBraces width={12} height={12} /> {openingJson ? 'Opening…' : 'Open in JSON Viewer'}
+          </button>
+          <button className="icon-btn" title="Copy response body" onClick={copyBody}>
+            <IconCopy />
+          </button>
+          <button className="icon-btn" title="Save response to file" onClick={saveBody}>
+            <IconDownload />
+          </button>
+        </div>
       </div>
 
       {result.unresolved?.missing?.length > 0 && (
@@ -348,6 +376,14 @@ function parseCookies(headers) {
     out.push(cookie);
   }
   return out;
+}
+
+/** Resolves once the window has painted, or soon anyway when frames are held back (a hidden window). */
+function nextPaint() {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => setTimeout(resolve, 0));
+    setTimeout(resolve, 150);
+  });
 }
 
 function guessFilename(url, contentType) {
