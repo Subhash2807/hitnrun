@@ -157,6 +157,8 @@ function fakeApp(version = '1.7.0') {
       for (let i = 0; i < 100 && !(fs.existsSync(log) && fs.readFileSync(log, 'utf8').includes('done')); i++) await sleep(200);
       assert.equal(fs.readFileSync(bin, 'utf8'), '1.8.0', fs.existsSync(log) ? fs.readFileSync(log, 'utf8') : 'no log');
       assert.ok(!fs.existsSync(`${installed}.updating`), 'old copy removed');
+      // hitnrun quits a moment after starting the swap; the swap can finish first.
+      for (let i = 0; i < 20 && !app.quits; i++) await sleep(100);
       assert.equal(app.quits, 1);
       const attrs = execFileSync('/usr/bin/xattr', [installed]).toString();
       assert.ok(!attrs.includes('com.apple.quarantine'));
