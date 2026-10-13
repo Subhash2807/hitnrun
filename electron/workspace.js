@@ -43,13 +43,20 @@ function defaultRequest(overrides = {}) {
  * Open tabs must be a flat list of id strings. A malformed entry (a nested
  * list, a null) used to crash the tab bar and leave the whole window blank, so
  * bad entries are dropped on load and on every change rather than trusted.
+ * The JSON viewer keeps its own tabs, held to the same rules.
  */
 function normalizeUi(ui) {
-  const raw = Array.isArray(ui.tabs) ? ui.tabs : [];
-  ui.tabs = [...new Set(raw.filter((t) => typeof t === 'string' && t))];
+  const clean = (list) => [...new Set((Array.isArray(list) ? list : []).filter((t) => typeof t === 'string' && t))];
+  ui.tabs = clean(ui.tabs);
   if (typeof ui.activeTabId !== 'string' || !ui.tabs.includes(ui.activeTabId)) {
     ui.activeTabId = ui.tabs.at(-1) ?? null;
   }
+  ui.jsonTabs = clean(ui.jsonTabs);
+  if (typeof ui.jsonActiveId !== 'string' || !ui.jsonTabs.includes(ui.jsonActiveId)) {
+    ui.jsonActiveId = ui.jsonTabs.at(-1) ?? null;
+  }
+  // Which half of the app fills the window: requests, or the JSON viewer.
+  if (ui.view !== 'json') ui.view = 'requests';
   return ui;
 }
 
@@ -77,7 +84,10 @@ function defaultState() {
       aiSessionMode: 'per-session',
       aiPolicy: { enabled: true, blockedHosts: [], blockedMethods: ['DELETE'] },
     },
-    ui: { tabs: [], activeTabId: null, sidebarWidth: 280, sidebarTab: 'collections' },
+    ui: {
+      tabs: [], activeTabId: null, sidebarWidth: 280, sidebarTab: 'collections',
+      view: 'requests', jsonTabs: [], jsonActiveId: null,
+    },
   };
 }
 
