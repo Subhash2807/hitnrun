@@ -50,6 +50,11 @@ Full releases only offer full releases; a beta also offers newer betas.
   shown as the output, ready to copy or open in the JSON viewer. Nothing is sent, and the
   script is saved with the request. Use `pm.environment.set('payload', …)` to
   pass the output to another request as `{{payload}}`.
+- **Read epoch timestamps.** The clock icon on the right of a request opens
+  **Epoch time**. Paste an epoch (seconds, milliseconds, microseconds or
+  nanoseconds) or a date, pick a time zone from the searchable list, and see it
+  as a date, in ISO 8601, in UTC and as "how long ago". Double-click a timestamp
+  in a response to fill it in. The time zone you pick is remembered.
 - **Import Postman collections** from the **+** menu.
 - **Auto-save.** There is no Save button; everything is saved as you type.
 

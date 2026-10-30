@@ -391,7 +391,14 @@ function MapOutput({ run, wrap, theme }) {
       )}
       {/* What was printed before an error still shows, below it. */}
       {run.output ? (
-        <Editor value={run.output.text} language={detectLanguage('', run.output.text)} readOnly wrap={wrap} theme={theme} />
+        <Editor
+          value={run.output.text}
+          language={detectLanguage('', run.output.text)}
+          readOnly
+          wrap={wrap}
+          theme={theme}
+          onSelectText={pickTimestamp}
+        />
       ) : (
         !run.error && (
           <div className="empty-note">
@@ -435,9 +442,13 @@ function BodyView({ decoded, response, view, wrap, theme }) {
       readOnly
       wrap={wrap}
       theme={theme}
+      onSelectText={pickTimestamp}
     />
   );
 }
+
+// Double-clicking an epoch in a response shows it in the Time panel.
+const pickTimestamp = (text) => useStore.getState().pickTimestamp(text);
 
 function ConsoleList({ logs }) {
   if (!logs?.length) {

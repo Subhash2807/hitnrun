@@ -77,6 +77,8 @@ export const useStore = create((set, get) => ({
   responses: {},
   sending: {},
   progress: {},
+  // The Time panel's input. Double-clicking an epoch in a response fills it in.
+  epochText: '',
   // requestId -> the last Map script run: { output, error, running, result }.
   // `result` is the response it ran on, so a newer send shows the output as stale.
   maps: {},
@@ -414,6 +416,17 @@ export const useStore = create((set, get) => ({
     }
     set((s) => ({ maps: { ...s.maps, [requestId]: { ...run, result, running: false } } }));
     return run;
+  },
+
+  setEpochText(epochText) {
+    set({ epochText });
+  },
+
+  /** Text selected in a response: an epoch-sized number goes to the Time panel. */
+  pickTimestamp(text) {
+    const t = text.trim();
+    // Seconds through nanoseconds. Shorter numbers are ids and counts, not times.
+    if (/^-?\d{10,19}$/.test(t)) set({ epochText: t });
   },
 
   /** A Map script's output as a new page in the JSON viewer. */

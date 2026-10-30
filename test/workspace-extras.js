@@ -243,6 +243,58 @@ const tmp = (label) => path.join(os.tmpdir(), `hitnrun-${label}-${Date.now()}-${
     assert.equal(countEntries('"a,b": [1,2,3], "c": {"d": ","}'), 2);
   });
 
+  console.log('\nepoch time panel');
+
+  const E = await import('../src/lib/epoch.mjs');
+  const MS = 1695391932115; // 2023-09-22T14:12:12.115Z
+
+  await test('epochs are read in the unit their size implies', () => {
+    assert.deepEqual(E.parseTimestamp(String(MS)), { ms: MS, unit: 'milliseconds' });
+    assert.deepEqual(E.parseTimestamp('1695391932'), { ms: 1695391932000, unit: 'seconds' });
+    assert.deepEqual(E.parseTimestamp('1695391932115000'), { ms: MS, unit: 'microseconds' });
+    assert.deepEqual(E.parseTimestamp('1695391932115000000'), { ms: MS, unit: 'nanoseconds' });
+  });
+
+  await test('quotes, commas and dates are understood; junk is not', () => {
+    assert.equal(E.parseTimestamp(`"${MS}",`).ms, MS);
+    assert.equal(E.parseTimestamp('1,695,391,932,115').ms, MS);
+    assert.deepEqual(E.parseTimestamp('2023-09-22T14:12:12.115Z'), { ms: MS, unit: 'date' });
+    assert.ok(E.parseTimestamp('soon').error);
+    assert.ok(E.parseTimestamp('9'.repeat(25)).error, 'out of Date range');
+    assert.equal(E.parseTimestamp('  '), null);
+  });
+
+  await test('a moment is shown in the chosen zone, with its offset', () => {
+    const india = E.describeMoment(MS, 'Asia/Kolkata');
+    assert.equal(india.iso, '2023-09-22T19:42:12.115+05:30');
+    assert.match(india.local, /^Fri, 22 Sept? 2023, 19:42:12\.115 GMT\+05:30$/);
+    assert.equal(india.utc, '2023-09-22T14:12:12.115Z');
+    assert.equal(india.seconds, '1695391932');
+    assert.equal(E.describeMoment(MS, 'UTC').iso, '2023-09-22T14:12:12.115+00:00');
+    // Daylight saving: New York is -04:00 in September.
+    assert.equal(E.describeMoment(MS, 'America/New_York').iso, '2023-09-22T10:12:12.115-04:00');
+  });
+
+  await test('relative time picks the largest whole unit', () => {
+    const now = Date.UTC(2026, 0, 1);
+    assert.equal(E.relativeTime(now - 3 * 3600e3, now), '3 hours ago');
+    assert.equal(E.relativeTime(now + 2 * 86400e3, now), 'in 2 days');
+    assert.equal(E.relativeTime(now, now), 'now');
+  });
+
+  await test('the zone list starts with UTC, uses current names, and searches by city, name or offset', () => {
+    const ids = E.timeZones().map((z) => z.id);
+    assert.equal(ids[0], 'UTC');
+    assert.equal(ids.includes('Asia/Calcutta'), false, 'old ICU names are replaced');
+    assert.equal(new Set(ids).size, ids.length, 'no duplicates after renaming');
+    assert.ok(E.searchZones('kolkata').some((z) => z.id === 'Asia/Kolkata'));
+    assert.ok(E.searchZones('india standard').some((z) => z.id === 'Asia/Kolkata'));
+    assert.ok(E.searchZones('+05:30').some((z) => z.id === 'Asia/Kolkata'));
+    assert.ok(E.searchZones('new york').some((z) => z.id === 'America/New_York'));
+    assert.equal(E.currentZoneName('Asia/Calcutta'), 'Asia/Kolkata');
+    assert.equal(E.isZone('Mars/Olympus_Mons'), false);
+  });
+
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 })();

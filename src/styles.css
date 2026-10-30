@@ -2323,6 +2323,82 @@ textarea.editable {
   }
 }
 
+/* Epoch time panel */
+.time-panel {
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.time-input-row {
+  display: flex;
+  gap: 6px;
+}
+
+.time-input-row .btn {
+  height: 30px;
+}
+
+.time-note {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.time-note.error {
+  color: var(--error);
+}
+
+.time-rows {
+  padding: 6px 0 0;
+}
+
+.zone-picker {
+  position: relative;
+}
+
+.zone-current {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+  font-family: var(--sans);
+  color: var(--text);
+  cursor: pointer;
+}
+
+/* The search box stays put; only the list under it scrolls. */
+.zone-menu {
+  left: 0;
+  right: 0;
+  max-height: none;
+  overflow: visible;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.zone-list {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.zone-list .dropdown-item.active {
+  background: var(--bg-hover);
+}
+
+.zone-list .dropdown-item.selected {
+  color: var(--accent);
+}
+
+.zone-long {
+  display: block;
+  font-size: 11px;
+}
+
 /* ---------------------------------------------------------- AI chat (beta) */
 
 .chat-toggle {
