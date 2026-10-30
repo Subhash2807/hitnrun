@@ -246,16 +246,15 @@ function buildResponseApi(response) {
 }
 
 /**
- * Execute a script. Never throws: a failing script comes back as { error }.
+ * The globals a script runs with. Whatever it logs or tests lands in the
+ * returned `logs` and `tests`.
  *
  * `handlers` supplies live access to workspace variables so pm.environment.set
  * writes through to the real workspace (and therefore auto-saves).
  */
-function runScript(code, { request, response, handlers, timeoutMs = 5000 } = {}) {
+function buildSandbox({ request, response, handlers }) {
   const logs = [];
   const tests = [];
-
-  if (!code || !code.trim()) return { logs, tests, error: null, skipped: true };
 
   const log = (level) => (...args) => {
     logs.push({
@@ -353,6 +352,15 @@ function runScript(code, { request, response, handlers, timeoutMs = 5000 } = {})
     responseBody: responseApi ? responseApi.text() : undefined,
   };
 
+  return { sandbox, logs, tests };
+}
+
+/** Execute a script. Never throws: a failing script comes back as { error }. */
+function runScript(code, { request, response, handlers, timeoutMs = 5000 } = {}) {
+  if (!code || !code.trim()) return { logs: [], tests: [], error: null, skipped: true };
+
+  const { sandbox, logs, tests } = buildSandbox({ request, response, handlers });
+
   try {
     const context = vm.createContext(sandbox);
     new vm.Script(code, { filename: 'script.js' }).runInContext(context, { timeout: timeoutMs });
@@ -366,4 +374,45 @@ function runScript(code, { request, response, handlers, timeoutMs = 5000 } = {})
   }
 }
 
-module.exports = { runScript, expect, Assertion, AssertionError };
+/**
+ * Run a Map script: turn a response that already came back into something
+ * else, like the payload for the next request. Nothing is sent.
+ *
+ * On top of what a test script gets, it sees `json` (the parsed body, or null
+ * when the body isn't JSON). Its output is what it prints with console.log(),
+ * one call per line: strings as they are, anything else as indented JSON.
+ * A value it `return`s is printed last, so a script can end with one instead.
+ * What was printed before an error is kept. Never throws.
+ */
+function runMap(code, { request, response, handlers, timeoutMs = 5000 } = {}) {
+  if (!code || !code.trim()) return { output: null, error: null, skipped: true };
+
+  const { sandbox, logs } = buildSandbox({ request, response, handlers });
+  try {
+    sandbox.json = JSON.parse(sandbox.responseBody ?? '');
+  } catch {
+    sandbox.json = null; // not JSON: pm.response.text() still has the body
+  }
+
+  let error = null;
+  try {
+    const context = vm.createContext(sandbox);
+    // Wrapped on the script's own first line, so `return` works and the line
+    // numbers in an error still match the editor.
+    const value = new vm.Script(`(function () {${code}\n})()`, { filename: 'map.js' }).runInContext(context, {
+      timeout: timeoutMs,
+    });
+    // A Promise isn't awaited (vm's timeout can't bound async work), so it would only print as {}.
+    if (typeof value?.then === 'function') throw new Error('Map scripts run synchronously: return the value, not a Promise');
+    if (value !== undefined) sandbox.console.log(value);
+  } catch (err) {
+    // An unclosed brace is only noticed on the wrapper's closing line; point at the script's last.
+    const line = /map\.js:(\d+)/.exec(err?.stack || '')?.[1];
+    const lastLine = code.split('\n').length;
+    error = { message: err?.message || String(err), line: line ? Math.min(Number(line), lastLine) : null };
+  }
+
+  return { output: logs.length ? { text: logs.map((l) => l.text).join('\n') } : null, error };
+}
+
+module.exports = { runScript, runMap, expect, Assertion, AssertionError };

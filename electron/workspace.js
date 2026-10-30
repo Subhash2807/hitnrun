@@ -31,7 +31,7 @@ function defaultRequest(overrides = {}) {
     headers: [],
     auth: { type: 'inherit' },
     body: { mode: 'none', raw: '', rawType: 'json', fields: [], src: '', graphql: { query: '', variables: '' } },
-    scripts: { pre: '', test: '' },
+    scripts: { pre: '', test: '', map: '' },
     settings: { followRedirects: true, sslVerify: true, timeout: null },
     createdAt: now,
     updatedAt: now,

@@ -1229,6 +1229,33 @@ input[type='checkbox'] {
 .log-warn { color: var(--warn); }
 .log-error { color: var(--error); }
 
+/* The Map tab: its script on top, the output below, each scrolling on its own. */
+.map-view,
+.map-pane {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.map-pane:first-child {
+  border-bottom: 1px solid var(--border);
+}
+
+.map-hint {
+  font-size: 11px;
+  color: var(--text-faint);
+  font-family: var(--mono);
+}
+
+.map-stale {
+  margin-left: 8px;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--warn);
+}
+
 .preview-frame {
   flex: 1;
   border: none;

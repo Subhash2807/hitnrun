@@ -45,6 +45,11 @@ Full releases only offer full releases; a beta also offers newer betas.
   JavaScript or Python.
 - **Use variables** like `{{token}}` with environments (dev, staging, prod).
 - **Write tests** with Postman-style scripts (`pm.test`, `pm.environment.set`).
+- **Reshape a response.** The **Map** tab next to the response runs your
+  JavaScript on it: `json` is the body, and whatever you `console.log()` is
+  shown as the output, ready to copy or open in the JSON viewer. Nothing is sent, and the
+  script is saved with the request. Use `pm.environment.set('payload', …)` to
+  pass the output to another request as `{{payload}}`.
 - **Import Postman collections** from the **+** menu.
 - **Auto-save.** There is no Save button; everything is saved as you type.
 

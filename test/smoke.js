@@ -17,7 +17,7 @@ const fs = require('node:fs');
 const { parseCurl, toCurl } = require('../electron/curl');
 const { Workspace, defaultRequest } = require('../electron/workspace');
 const { compile } = require('../electron/resolve');
-const { execute } = require('../electron/runner');
+const { execute, mapResponse } = require('../electron/runner');
 const { ControlServer } = require('../electron/control-server');
 const { parseSource, buildPatch, syncState, describeChanges } = require('../electron/sync');
 
@@ -469,6 +469,57 @@ async function callApi(port, method, urlPath, body) {
     assert.equal(result.ok, false);
     assert.equal(result.phase, 'pre-request');
     assert.match(result.error.message, /nope/);
+  });
+
+  /* ============================================================== map */
+  section('Map scripts');
+
+  const sendForMap = async (ws, urlPath = '/echo?id=7') => execute(ws, defaultRequest({ url: `${origin}${urlPath}` }), {});
+
+  await test('a map script prints its output: objects as JSON, strings as they are, a line per call', async () => {
+    const { ws } = tempWorkspace();
+    const result = await sendForMap(ws);
+    const run = mapResponse(ws, `console.log({ id: Number(json.query.id) });\nconsole.log('via', json.method);`, result);
+    assert.equal(run.error, null);
+    assert.equal(run.output.text, '{\n  "id": 7\n}\nvia GET');
+  });
+
+  await test('a returned value is printed last', async () => {
+    const { ws } = tempWorkspace();
+    const result = await sendForMap(ws);
+    const run = mapResponse(ws, `console.log('first');\nreturn [json.query.id];`, result);
+    assert.equal(run.output.text, 'first\n[\n  "7"\n]');
+  });
+
+  await test('json is null when the body is not JSON; pm.response still has it', async () => {
+    const { ws } = tempWorkspace();
+    const result = await sendForMap(ws, '/status/500');
+    const run = mapResponse(ws, `console.log(JSON.stringify({ json, text: pm.response.text(), code: pm.response.code }));`, result);
+    assert.deepEqual(JSON.parse(run.output.text), { json: null, text: 'boom', code: 500 });
+  });
+
+  await test('nothing printed, a throw, and a Promise are all reported', async () => {
+    const { ws } = tempWorkspace();
+    const result = await sendForMap(ws);
+    const none = mapResponse(ws, `const a = json.method;`, result);
+    assert.equal(none.output, null);
+    assert.equal(none.error, null);
+    const thrown = mapResponse(ws, `console.log('before');\nthrow new Error('bad map');`, result);
+    assert.match(thrown.error.message, /bad map/);
+    assert.equal(thrown.error.line, 2);
+    assert.equal(thrown.output.text, 'before', 'what was printed before the error is kept');
+    assert.equal(mapResponse(ws, `return {`, result).error.line, 1);
+    assert.match(mapResponse(ws, `return Promise.resolve(1);`, result).error.message, /Promise/);
+  });
+
+  await test('a map script can set a variable for the next request', async () => {
+    const { ws } = tempWorkspace();
+    const env = ws.createEnvironment('E', []);
+    ws.setActiveEnvironment(env.id);
+    const result = await sendForMap(ws);
+    mapResponse(ws, `pm.environment.set('payload', JSON.stringify({ id: json.query.id }));`, result);
+    const value = ws.getState().environments.find((e) => e.id === env.id).values.find((v) => v.key === 'payload').value;
+    assert.equal(value, '{"id":"7"}');
   });
 
   /* ============================================== source cURL syncing */

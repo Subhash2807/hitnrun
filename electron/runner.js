@@ -10,7 +10,7 @@
 
 const { compile, buildScope, resolveString } = require('./resolve');
 const { sendRequest } = require('./http-engine');
-const { runScript } = require('./scripts');
+const { runScript, runMap } = require('./scripts');
 const { buildGuard } = require('./guardrails');
 
 function makeHandlers(workspace, collection, extraHeaders) {
@@ -188,6 +188,19 @@ async function execute(
   return result;
 }
 
+/**
+ * Run a Map script on a response a request already got. pm.environment.set()
+ * writes through, so the output can feed another request as a {{variable}}.
+ * `request` is the `request` of the result being mapped.
+ */
+function mapResponse(workspace, code, { request, response, collection = null }) {
+  return runMap(code, {
+    request: request && { ...request, bodyText: request.bodyPreview },
+    response,
+    handlers: makeHandlers(workspace, collection, []),
+  });
+}
+
 function fullUrl(spec) {
   try {
     const u = new URL(spec.url);
@@ -217,4 +230,4 @@ function describeBody(body) {
   return null;
 }
 
-module.exports = { execute, fullUrl };
+module.exports = { execute, mapResponse, fullUrl };

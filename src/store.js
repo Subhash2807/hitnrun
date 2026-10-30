@@ -77,6 +77,9 @@ export const useStore = create((set, get) => ({
   responses: {},
   sending: {},
   progress: {},
+  // requestId -> the last Map script run: { output, error, running, result }.
+  // `result` is the response it ran on, so a newer send shows the output as stale.
+  maps: {},
   // requestId -> { state: 'synced'|'drifted'|'exempt'|'no-source', changes: [] }
   // Computed in the main process and pushed with every workspace change.
   syncStates: {},
@@ -315,9 +318,11 @@ export const useStore = create((set, get) => ({
     set((s) => {
       const drafts = { ...s.drafts };
       const responses = { ...s.responses };
+      const maps = { ...s.maps };
       delete drafts[id];
       delete responses[id];
-      return { state, drafts, responses };
+      delete maps[id];
+      return { state, drafts, responses, maps };
     });
   },
 
@@ -393,6 +398,36 @@ export const useStore = create((set, get) => ({
       }));
       return result;
     }
+  },
+
+  /** Run the request's Map script on the response on screen. Nothing is sent. */
+  async runMap(requestId) {
+    const result = get().responses[requestId];
+    const code = get().getRequest(requestId)?.scripts?.map;
+    if (!result?.response || !code?.trim()) return null;
+    set((s) => ({ maps: { ...s.maps, [requestId]: { ...s.maps[requestId], running: true } } }));
+    let run;
+    try {
+      run = await api.mapResponse(requestId, code, { request: result.request, response: result.response });
+    } catch (err) {
+      run = { output: null, error: { message: err?.message || String(err) } };
+    }
+    set((s) => ({ maps: { ...s.maps, [requestId]: { ...run, result, running: false } } }));
+    return run;
+  },
+
+  /** A Map script's output as a new page in the JSON viewer. */
+  async openMapInJson(requestId) {
+    const run = get().maps[requestId];
+    if (!run?.output) return null;
+    const base = responsePageName(get().getRequest(requestId)?.name, run.result?.request?.url);
+    const file = await get().createJsonFile({
+      name: base.replace(/\.json$/i, ' (map).json'),
+      content: beautifyIfValid(run.output.text, get().state?.ui?.jsonIndent ?? 2),
+      unique: true,
+    });
+    if (file) get().showToast(`Opened "${file.name}" — ${navigator.userAgent.includes('Mac') ? 'Cmd' : 'Ctrl'}+J to come back`);
+    return file;
   },
 
   /* ------------------------------------------------------- ai workspace */
