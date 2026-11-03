@@ -71,6 +71,18 @@ it's up to date:
 
 To update a whole folder at once, use its **⋯ menu → Sync all with source cURL**.
 
+### Key headers
+
+Next to that status, a **badge icon** shows which sandbox, dealer and tenant a
+request will hit. It appears when the request has any of the `tek-sandbox-id`,
+`dealerId` and `tenantname` headers, and its number says how many.
+
+- Hover to see them as they will be sent, with `{{variables}}` filled in from
+  the active environment.
+- Click a value to edit it. Enter saves, Escape cancels.
+- After a sync, or a change to the environment, the values update right away.
+- The icon turns amber when a value uses a variable the environment doesn't have.
+
 ## Record what you tested
 
 Click **● Record** in the top bar before you start testing a feature. Every

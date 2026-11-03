@@ -1542,6 +1542,140 @@ input[type='checkbox'] {
   cursor: default;
 }
 
+/* ============================================== key headers (sandbox, dealer, tenant) */
+
+.key-headers {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.key-headers-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 24px;
+  border-radius: 6px;
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
+.key-headers-btn.warn {
+  color: var(--warn);
+  border-color: rgba(230, 160, 32, 0.45);
+  background: rgba(230, 160, 32, 0.12);
+}
+
+.key-headers-count {
+  position: absolute;
+  top: -6px;
+  right: -7px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  border-radius: 8px;
+  border: 1px solid currentColor;
+  background: var(--bg);
+  font-size: 10px;
+  line-height: 13px;
+  text-align: center;
+}
+
+.key-headers-card {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 50;
+  width: 340px;
+  padding: 10px 12px 6px;
+  border-radius: 8px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-panel);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+  font-size: 12px;
+}
+
+/* Bridges the gap between icon and card so the hover isn't lost on the way. */
+.key-headers-card::before {
+  content: '';
+  position: absolute;
+  top: -7px;
+  left: 0;
+  right: 0;
+  height: 7px;
+}
+
+.key-headers-title {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  font-weight: 500;
+}
+
+.key-headers-env {
+  color: var(--text-faint);
+  font-weight: 400;
+  font-size: 11px;
+}
+
+.key-headers-row {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr) 22px;
+  gap: 8px;
+  align-items: center;
+  min-height: 30px;
+  border-top: 1px solid var(--border);
+}
+
+.key-headers-name {
+  font-family: var(--mono);
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.key-headers-value,
+.key-headers-input {
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 3px 6px;
+  border-radius: var(--radius);
+  border: 1px solid transparent;
+  text-align: left;
+  min-width: 0;
+}
+
+.key-headers-value {
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: text;
+}
+
+.key-headers-value:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-input);
+}
+
+.key-headers-value.warn {
+  color: var(--warn);
+}
+
+.key-headers-input {
+  border-color: var(--accent);
+  background: var(--bg-input);
+  color: var(--text);
+}
+
+.key-headers-empty {
+  color: var(--text-faint);
+  font-style: italic;
+  font-family: var(--sans);
+}
+
 /* Sidebar rows have no room for a chip — a bare dot carries the same signal. */
 .drift-dot {
   background: var(--warn);
