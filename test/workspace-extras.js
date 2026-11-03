@@ -293,6 +293,8 @@ const tmp = (label) => path.join(os.tmpdir(), `hitnrun-${label}-${Date.now()}-${
     assert.ok(E.searchZones('new york').some((z) => z.id === 'America/New_York'));
     assert.equal(E.currentZoneName('Asia/Calcutta'), 'Asia/Kolkata');
     assert.equal(E.isZone('Mars/Olympus_Mons'), false);
+  });
+
   console.log('\nsidebar search');
   const { searchTree, ancestorsOf, queryWords } = await import('../src/lib/treeSearch.mjs');
   const req = (id, name, method, url) => ({ id, type: 'request', name, method, url });
