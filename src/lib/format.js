@@ -1,5 +1,7 @@
 /** Presentation helpers. No state, no side effects. */
 
+import { prettyXmlOrSame } from './xmlFormat.mjs';
+
 export function prettyBytes(n) {
   if (n == null) return '—';
   if (n < 1024) return `${n} B`;
@@ -68,7 +70,8 @@ export function tryPretty(text, language) {
       return text;
     }
   }
-  if (language === 'xml' || language === 'html') return prettyXml(text);
+  if (language === 'xml') return prettyXmlOrSame(text);
+  if (language === 'html') return prettyXml(text);
   return text;
 }
 

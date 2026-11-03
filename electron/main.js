@@ -10,7 +10,7 @@ const { pathToFileURL } = require('node:url');
 const { Workspace, defaultRequest, uid } = require('./workspace');
 const { AiWorkspace } = require('./ai-workspace');
 const { normalizePolicy } = require('./guardrails');
-const { execute } = require('./runner');
+const { execute, mapResponse } = require('./runner');
 const { parseCurl, toCurl, looksLikeCurl } = require('./curl');
 const { ControlServer } = require('./control-server');
 const { parseSource, buildPatch, syncState, describeChanges } = require('./sync');
@@ -177,6 +177,7 @@ function buildMenu() {
       submenu: [
         { label: 'AI Assistant (Beta)', accelerator: 'CmdOrCtrl+L', click: emit('chat:toggle') },
         { label: 'JSON Viewer', accelerator: 'CmdOrCtrl+J', click: emit('view:json') },
+        { label: 'XML Formatter', accelerator: 'CmdOrCtrl+Shift+X', click: emit('view:xml') },
         { type: 'separator' },
         { role: 'reload' },
         { role: 'toggleDevTools' },
@@ -604,6 +605,12 @@ function registerIpc() {
     const result = await execute(workspace, defaultRequest(request), { collection: null });
     recordToDocs(result, { source: 'user' });
     return result;
+  });
+
+  // The Map tab: the window holds the response, so it sends it back to be mapped.
+  ipcMain.handle('req:map', (_e, requestId, code, { request, response } = {}) => {
+    const hit = workspace.findRequest(requestId);
+    return mapResponse(workspace, code, { request, response, collection: hit?.collection ?? null });
   });
 
   /* ------------------------------------------------------------ code panel */

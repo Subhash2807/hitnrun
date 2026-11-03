@@ -7,8 +7,9 @@ import DocView from './components/DocView.jsx';
 import { RecordControl } from './components/DocsPanel.jsx';
 import ChatPanel, { ChatToggle } from './components/ChatPanel.jsx';
 import JsonWorkbench from './components/JsonView.jsx';
+import XmlWorkbench from './components/XmlView.jsx';
 import Dropdown, { Item, Separator } from './components/Dropdown.jsx';
-import { IconPlus, IconClose, IconSettings, IconChevronDown, IconSync, IconDoc, IconDownload, IconBraces } from './components/Icons.jsx';
+import { IconPlus, IconClose, IconSettings, IconChevronDown, IconSync, IconDoc, IconDownload, IconBraces, IconCode } from './components/Icons.jsx';
 import { METHOD_COLORS } from './lib/format.js';
 
 export default function App() {
@@ -50,6 +51,7 @@ export default function App() {
       else if (command === 'collection:import') store.importPostman();
       else if (command === 'chat:toggle') store.toggleChat();
       else if (command === 'view:json') store.toggleView();
+      else if (command === 'view:xml') store.setView(ui?.view === 'xml' ? 'requests' : 'xml');
       else if (command === 'tab:close' && active) closeTab(active);
       else if (command === 'tab:next') cycleTab(1);
       else if (command === 'tab:prev') cycleTab(-1);
@@ -91,6 +93,8 @@ export default function App() {
         <div className="main">
           {state.ui.view === 'json' ? (
             <JsonWorkbench theme={theme} />
+          ) : state.ui.view === 'xml' ? (
+            <XmlWorkbench theme={theme} />
           ) : (
             <>
               <TabBar />
@@ -218,7 +222,7 @@ function UpdateButton() {
   );
 }
 
-/** Requests or the JSON viewer: the two halves of the app. */
+/** Requests, the JSON viewer or the XML formatter. */
 function ViewSwitch() {
   const view = useStore((s) => s.state?.ui?.view || 'requests');
   const setView = useStore((s) => s.setView);
@@ -242,6 +246,15 @@ function ViewSwitch() {
         onClick={() => setView('json')}
       >
         <IconBraces width={12} height={12} /> JSON
+      </button>
+      <button
+        role="tab"
+        aria-selected={view === 'xml'}
+        className={view === 'xml' ? 'active' : ''}
+        title={`XML formatter: beautify, minify and check XML (${mod}+Shift+X)`}
+        onClick={() => setView('xml')}
+      >
+        <IconCode width={12} height={12} /> XML
       </button>
     </div>
   );

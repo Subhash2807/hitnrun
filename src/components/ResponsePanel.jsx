@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import Editor from './Editor.jsx';
-import { IconCopy, IconDownload, IconBraces } from './Icons.jsx';
-import { api, useStore } from '../store.js';
+import { IconCopy, IconDownload, IconBraces, IconCode } from './Icons.jsx';
+import { api, useStore, findRequest } from '../store.js';
 import { AddToDocButton } from './DocsPanel.jsx';
 import { AskAiButton } from './ChatPanel.jsx';
 import { notJsonReason } from '../lib/responseJson.mjs';
@@ -38,6 +38,7 @@ export default function ResponsePanel({ requestId, result, sending, theme }) {
   }, [response]);
 
   const cookies = useMemo(() => parseCookies(response?.headers), [response]);
+  const hasMap = useStore((s) => !!(s.drafts[requestId] ?? findRequest(s.state, requestId)?.request)?.scripts?.map?.trim());
   const jsonProblem = useMemo(() => decoded && notJsonReason(decoded.contentType, decoded.text), [decoded]);
   const [openingJson, setOpeningJson] = useState(false);
 
@@ -148,6 +149,15 @@ export default function ResponsePanel({ requestId, result, sending, theme }) {
           >
             <IconBraces width={12} height={12} /> {openingJson ? 'Opening…' : 'Open in JSON Viewer'}
           </button>
+          {decoded?.language === 'xml' && (
+            <button
+              className="btn btn-sm"
+              title="Open this response in the XML formatter"
+              onClick={() => useStore.getState().openInXml(decoded.text)}
+            >
+              <IconCode width={12} height={12} /> Open in XML Formatter
+            </button>
+          )}
           <button className="icon-btn" title="Copy response body" onClick={copyBody}>
             <IconCopy />
           </button>
@@ -172,6 +182,7 @@ export default function ResponsePanel({ requestId, result, sending, theme }) {
           {failed > 0 && <span className="count-pill" style={{ color: 'var(--error)' }}>{failed} failed</span>}
         </Tab>
         <Tab id="console" tab={tab} setTab={setTab} count={result.scriptLogs?.length}>Console</Tab>
+        <Tab id="map" tab={tab} setTab={setTab} dot={hasMap}>Map</Tab>
 
         {tab === 'body' && (
           <div className="row" style={{ marginLeft: 'auto', gap: 4 }}>
@@ -281,7 +292,130 @@ export default function ResponsePanel({ requestId, result, sending, theme }) {
       )}
 
       {tab === 'console' && <ConsoleList logs={result.scriptLogs} />}
+
+      {tab === 'map' && <MapView requestId={requestId} result={result} wrap={wrap} theme={theme} />}
     </div>
+  );
+}
+
+const MAP_PLACEHOLDER = `// \`json\` is the response body. console.log() what you want to see, for example:
+// for (const item of json.items) console.log(item.id);`;
+
+/**
+ * The Map tab: a script, saved with the request, that turns this response into
+ * something else, like the payload for the next request. It runs in the main
+ * process like the other scripts, only when Run is pressed, and sends nothing.
+ */
+function MapView({ requestId, result, wrap, theme }) {
+  const code = useStore((s) => (s.drafts[requestId] ?? findRequest(s.state, requestId)?.request)?.scripts?.map ?? '');
+  const run = useStore((s) => s.maps[requestId]);
+  const showToast = useStore((s) => s.showToast);
+
+  const setCode = (map) => {
+    const { getRequest, patchRequest } = useStore.getState();
+    patchRequest(requestId, { scripts: { ...getRequest(requestId)?.scripts, map } });
+  };
+
+  const copy = () => {
+    api.copyToClipboard(run.output.text);
+    showToast('Output copied');
+  };
+
+  // The output stays up after a new send, marked, until Run is pressed again.
+  const stale = run && !run.running && run.result !== result;
+
+  // The script / output split drags like the request / response one, and is remembered the same way.
+  const savedSplit = useStore((s) => s.state?.ui?.mapSplitPct);
+  const [splitPct, setSplitPct] = useState(savedSplit ?? 45);
+  const viewRef = useRef(null);
+  const startDrag = (e) => {
+    e.preventDefault();
+    const rect = viewRef.current.getBoundingClientRect();
+    let pct = splitPct;
+    const onMove = (ev) => {
+      pct = Math.min(85, Math.max(15, ((ev.clientY - rect.top) / rect.height) * 100));
+      setSplitPct(pct);
+    };
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      useStore.getState().patchUi({ mapSplitPct: Math.round(pct) });
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
+
+  return (
+    <div className="map-view" ref={viewRef}>
+      <div className="map-pane" style={{ height: `${splitPct}%`, flex: 'none' }}>
+        <div className="section-head">
+          <span className="map-hint">json = the response body · console.log() prints to Output · pm works as in Tests</span>
+          <button
+            className="btn btn-sm btn-primary"
+            disabled={!code.trim() || run?.running}
+            onClick={() => useStore.getState().runMap(requestId)}
+          >
+            {run?.running ? 'Running…' : 'Run'}
+          </button>
+        </div>
+        <Editor value={code} language="javascript" onChange={setCode} theme={theme} placeholder={MAP_PLACEHOLDER} />
+      </div>
+
+      <div className="resizer resizer-h" title="Drag to resize" onMouseDown={startDrag} />
+
+      <div className="map-pane">
+        <div className="section-head">
+          <span className="section-title">
+            Output
+            {stale && <span className="map-stale">from an earlier response</span>}
+          </span>
+          {run?.output && (
+            <div className="section-actions">
+              <button className="btn btn-sm open-json" onClick={() => useStore.getState().openMapInJson(requestId)}>
+                <IconBraces width={12} height={12} /> Open in JSON Viewer
+              </button>
+              <button className="icon-btn" title="Copy output" onClick={copy}>
+                <IconCopy />
+              </button>
+            </div>
+          )}
+        </div>
+        <MapOutput run={run} wrap={wrap} theme={theme} />
+      </div>
+    </div>
+  );
+}
+
+function MapOutput({ run, wrap, theme }) {
+  if (run?.output === undefined) {
+    return <div className="empty-note">{run?.running ? 'Running…' : 'Press Run to see what the script returns.'}</div>;
+  }
+  return (
+    <>
+      {run.error && (
+        <div className="error-box">
+          <strong>Map script failed{run.error.line ? ` on line ${run.error.line}` : ''}</strong>
+          <div style={{ marginTop: 6 }}>{run.error.message}</div>
+        </div>
+      )}
+      {/* What was printed before an error still shows, below it. */}
+      {run.output ? (
+        <Editor
+          value={run.output.text}
+          language={detectLanguage('', run.output.text)}
+          readOnly
+          wrap={wrap}
+          theme={theme}
+          onSelectText={pickTimestamp}
+        />
+      ) : (
+        !run.error && (
+          <div className="empty-note">
+            Nothing was printed. Use <code className="mono">console.log(…)</code> to show something here.
+          </div>
+        )
+      )}
+    </>
   );
 }
 
@@ -317,9 +451,13 @@ function BodyView({ decoded, response, view, wrap, theme }) {
       readOnly
       wrap={wrap}
       theme={theme}
+      onSelectText={pickTimestamp}
     />
   );
 }
+
+// Double-clicking an epoch in a response shows it in the Time panel.
+const pickTimestamp = (text) => useStore.getState().pickTimestamp(text);
 
 function ConsoleList({ logs }) {
   if (!logs?.length) {
@@ -342,11 +480,12 @@ function ConsoleList({ logs }) {
   );
 }
 
-function Tab({ id, tab, setTab, count, children }) {
+function Tab({ id, tab, setTab, count, dot, children }) {
   return (
     <button className={`panel-tab ${tab === id ? 'active' : ''}`} onClick={() => setTab(id)}>
       {children}
       {count > 0 && <span className="count-pill">{count}</span>}
+      {dot && <span className="dot" />}
     </button>
   );
 }

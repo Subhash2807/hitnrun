@@ -243,6 +243,184 @@ const tmp = (label) => path.join(os.tmpdir(), `hitnrun-${label}-${Date.now()}-${
     assert.equal(countEntries('"a,b": [1,2,3], "c": {"d": ","}'), 2);
   });
 
+  console.log('\nepoch time panel');
+
+  const E = await import('../src/lib/epoch.mjs');
+  const MS = 1695391932115; // 2023-09-22T14:12:12.115Z
+
+  await test('epochs are read in the unit their size implies', () => {
+    assert.deepEqual(E.parseTimestamp(String(MS)), { ms: MS, unit: 'milliseconds' });
+    assert.deepEqual(E.parseTimestamp('1695391932'), { ms: 1695391932000, unit: 'seconds' });
+    assert.deepEqual(E.parseTimestamp('1695391932115000'), { ms: MS, unit: 'microseconds' });
+    assert.deepEqual(E.parseTimestamp('1695391932115000000'), { ms: MS, unit: 'nanoseconds' });
+  });
+
+  await test('quotes, commas and dates are understood; junk is not', () => {
+    assert.equal(E.parseTimestamp(`"${MS}",`).ms, MS);
+    assert.equal(E.parseTimestamp('1,695,391,932,115').ms, MS);
+    assert.deepEqual(E.parseTimestamp('2023-09-22T14:12:12.115Z'), { ms: MS, unit: 'date' });
+    assert.ok(E.parseTimestamp('soon').error);
+    assert.ok(E.parseTimestamp('9'.repeat(25)).error, 'out of Date range');
+    assert.equal(E.parseTimestamp('  '), null);
+  });
+
+  await test('a moment is shown in the chosen zone, with its offset', () => {
+    const india = E.describeMoment(MS, 'Asia/Kolkata');
+    assert.equal(india.iso, '2023-09-22T19:42:12.115+05:30');
+    assert.match(india.local, /^Fri, 22 Sept? 2023, 19:42:12\.115 GMT\+05:30$/);
+    assert.equal(india.utc, '2023-09-22T14:12:12.115Z');
+    assert.equal(india.seconds, '1695391932');
+    assert.equal(E.describeMoment(MS, 'UTC').iso, '2023-09-22T14:12:12.115+00:00');
+    // Daylight saving: New York is -04:00 in September.
+    assert.equal(E.describeMoment(MS, 'America/New_York').iso, '2023-09-22T10:12:12.115-04:00');
+  });
+
+  await test('relative time picks the largest whole unit', () => {
+    const now = Date.UTC(2026, 0, 1);
+    assert.equal(E.relativeTime(now - 3 * 3600e3, now), '3 hours ago');
+    assert.equal(E.relativeTime(now + 2 * 86400e3, now), 'in 2 days');
+    assert.equal(E.relativeTime(now, now), 'now');
+  });
+
+  await test('the zone list starts with UTC, uses current names, and searches by city, name or offset', () => {
+    const ids = E.timeZones().map((z) => z.id);
+    assert.equal(ids[0], 'UTC');
+    assert.equal(ids.includes('Asia/Calcutta'), false, 'old ICU names are replaced');
+    assert.equal(new Set(ids).size, ids.length, 'no duplicates after renaming');
+    assert.ok(E.searchZones('kolkata').some((z) => z.id === 'Asia/Kolkata'));
+    assert.ok(E.searchZones('india standard').some((z) => z.id === 'Asia/Kolkata'));
+    assert.ok(E.searchZones('+05:30').some((z) => z.id === 'Asia/Kolkata'));
+    assert.ok(E.searchZones('new york').some((z) => z.id === 'America/New_York'));
+    assert.equal(E.currentZoneName('Asia/Calcutta'), 'Asia/Kolkata');
+    assert.equal(E.isZone('Mars/Olympus_Mons'), false);
+  });
+
+  console.log('\nsidebar search');
+  const { searchTree, ancestorsOf, queryWords } = await import('../src/lib/treeSearch.mjs');
+  const req = (id, name, method, url) => ({ id, type: 'request', name, method, url });
+  const tree = [
+    {
+      id: 'c1', name: 'Shop API', items: [
+        { id: 'f1', type: 'folder', name: 'Users', items: [
+          req('r1', 'List users', 'GET', 'https://x/users'),
+          { id: 'f1a', type: 'folder', name: 'Admin', items: [req('r2', 'Ban', 'POST', 'https://x/admin/ban')] },
+        ] },
+        { id: 'f2', type: 'folder', name: 'Orders', items: [req('r3', 'Refund', 'POST', 'https://x/orders/1/refund')] },
+        req('r4', 'Health', 'GET', 'https://x/health'),
+      ],
+    },
+    { id: 'c2', name: 'Other', items: [{ id: 'f3', type: 'folder', name: 'Misc', items: [req('r5', 'Ping', 'GET', 'https://ping.dev')] }] },
+  ];
+
+  await test('a blank query is no search', () => {
+    assert.equal(searchTree(tree, ''), null);
+    assert.equal(searchTree(tree, '   '), null);
+    assert.deepEqual(queryWords('  A  b '), ['a', 'b']);
+  });
+
+  await test('a match deep in a folder opens every folder on the way, and only those', () => {
+    const m = searchTree(tree, 'ban');
+    assert.deepEqual([...m.requests], ['r2']);
+    assert.deepEqual([...m.containers].sort(), ['c1', 'f1', 'f1a']);
+  });
+
+  await test('names, URLs and methods match, case aside', () => {
+    assert.deepEqual([...searchTree(tree, 'REFUND').requests], ['r3']);
+    assert.deepEqual([...searchTree(tree, 'ping.dev').requests], ['r5']);
+    assert.deepEqual([...searchTree(tree, 'post').requests].sort(), ['r2', 'r3']);
+  });
+
+  await test("a folder's name finds what is inside it, and words combine", () => {
+    assert.deepEqual([...searchTree(tree, 'users').requests].sort(), ['r1', 'r2']);
+    assert.deepEqual([...searchTree(tree, 'users post').requests], ['r2']);
+    assert.deepEqual([...searchTree(tree, 'misc').containers].sort(), ['c2', 'f3']);
+  });
+
+  await test('no match leaves nothing to show', () => {
+    const m = searchTree(tree, 'nothing-like-this');
+    assert.equal(m.requests.size, 0);
+    assert.equal(m.containers.size, 0);
+  });
+
+  await test('missing names, URLs and items do not break the search', () => {
+    const odd = [{ id: 'c', name: undefined, items: [{ id: 'r', type: 'request' }, null, { id: 'f', type: 'folder' }] }];
+    assert.equal(searchTree(odd, 'x').requests.size, 0);
+    assert.equal(searchTree(odd, 'undefined').requests.size, 0);
+  });
+
+  await test('the folders around a request are found, outermost first', () => {
+    assert.deepEqual(ancestorsOf(tree, 'r2'), ['c1', 'f1', 'f1a']);
+    assert.deepEqual(ancestorsOf(tree, 'r4'), ['c1']);
+    assert.deepEqual(ancestorsOf(tree, 'nope'), []);
+  });
+
+  console.log('\nxml formatter');
+  const X = await import('../src/lib/xmlFormat.mjs');
+
+  await test('beautify indents elements and keeps text-only elements on one line', () => {
+    assert.equal(
+      X.formatXml('<a><b>1</b><c><d/></c></a>'),
+      '<a>\n  <b>1</b>\n  <c>\n    <d/>\n  </c>\n</a>'
+    );
+    assert.equal(X.formatXml('<a><b>1</b></a>', { indent: 4 }), '<a>\n    <b>1</b>\n</a>');
+    assert.equal(X.formatXml('<a><b>1</b></a>', { indent: '\t' }), '<a>\n\t<b>1</b>\n</a>');
+  });
+
+  await test('comments, CDATA, declarations and attribute values survive untouched', () => {
+    const doc = '<?xml version="1.0"?><!DOCTYPE a [<!ENTITY e "v">]><a  x="1 > 0"   y=\'q = r\'><!-- c --><b><![CDATA[<raw> & ]]></b></a>';
+    const out = X.formatXml(doc);
+    for (const piece of ['<?xml version="1.0"?>', '<!DOCTYPE a [<!ENTITY e "v">]>', '<a x="1 > 0" y=\'q = r\'>', '<!-- c -->', '<b><![CDATA[<raw> & ]]></b>']) {
+      assert.ok(out.includes(piece), `${piece} in\n${out}`);
+    }
+    assert.equal(X.formatXml(out), out, 'idempotent');
+  });
+
+  await test('minify removes only the whitespace between tags', () => {
+    assert.equal(X.formatXml('<a>\n  <b> x y </b>\n  <c/>\n</a>', { minify: true }), '<a><b> x y </b><c/></a>');
+  });
+
+  await test('mixed text and xml:space="preserve" keep their whitespace', () => {
+    assert.equal(X.formatXml('<r><p>Hi <b>you</b> !</p></r>'), '<r>\n  <p>Hi <b>you</b> !</p>\n</r>');
+    const pre = '<pre xml:space="preserve">  a\n   b </pre>';
+    assert.ok(X.formatXml(`<r>${pre}</r>`).includes(pre));
+  });
+
+  await test('problems are reported with where they are', () => {
+    const e = (t) => X.parseXml(t).error;
+    assert.deepEqual([e('<a>\n<b></a>').line, e('<a>\n<b></a>').col], [2, 4]);
+    assert.match(e('<a>\n<b></a>').message, /Expected <\/b> but found <\/a>/);
+    assert.match(e('<a>').message, /<a> is never closed/);
+    assert.match(e('<a x=1/>').message, /must be in quotes/);
+    assert.match(e('<a x="1" x="2"/>').message, /twice/);
+    assert.match(e('<a>1 < 2</a>').message, /&lt;/);
+    assert.match(e('<!-- x').message, /never closed/);
+    assert.match(e('</a>').message, /closes nothing/);
+    assert.equal(e('<a/>'), null);
+    assert.equal(e(''), null);
+  });
+
+  await test('two roots or stray text are invalid, but can still be formatted', () => {
+    const r = X.parseXml('<a/><b/>');
+    assert.equal(r.error.fatal, false);
+    assert.match(r.error.message, /More than one root/);
+    assert.equal(X.formatXml('<a/><b/>'), '<a/>\n<b/>');
+  });
+
+  await test('formatting broken XML throws with a line and column', () => {
+    assert.throws(() => X.formatXml('<a>\n<b>'), (err) => err.line === 2 && /never closed/.test(err.message));
+    assert.equal(X.prettyXmlOrSame('<a><b></a>'), '<a><b></a>');
+  });
+
+  await test('response bodies: tryPretty indents XML that holds text', async () => {
+    // The old pretty-printer lost track of depth after any element holding text.
+    const out = X.prettyXmlOrSame('<list><item>a</item><item>b</item><n><x>1</x></n></list>');
+    assert.equal(out, '<list>\n  <item>a</item>\n  <item>b</item>\n  <n>\n    <x>1</x>\n  </n>\n</list>');
+  });
+
+  await test('elements are counted', () => {
+    assert.equal(X.countElements(X.parseXml('<a><b/><c><d/></c></a>').nodes), 4);
+  });
+
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 })();

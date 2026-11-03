@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('api', {
   send: (requestId, overrides) => ipcRenderer.invoke('req:send', requestId, overrides),
   sendAdHoc: (request) => ipcRenderer.invoke('req:sendAdHoc', request),
   cancel: (runId) => ipcRenderer.invoke('req:cancel', runId),
+  mapResponse: (requestId, code, result) => ipcRenderer.invoke('req:map', requestId, code, result),
 
   /* cURL ----------------------------------------------------------------- */
   parseCurl: (text) => ipcRenderer.invoke('curl:parse', text),

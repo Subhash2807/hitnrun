@@ -1229,6 +1229,33 @@ input[type='checkbox'] {
 .log-warn { color: var(--warn); }
 .log-error { color: var(--error); }
 
+/* The Map tab: its script on top, the output below, each scrolling on its own. */
+.map-view,
+.map-pane {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.map-pane:first-child {
+  border-bottom: 1px solid var(--border);
+}
+
+.map-hint {
+  font-size: 11px;
+  color: var(--text-faint);
+  font-family: var(--mono);
+}
+
+.map-stale {
+  margin-left: 8px;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--warn);
+}
+
 .preview-frame {
   flex: 1;
   border: none;
@@ -2294,6 +2321,82 @@ textarea.editable {
   .side-panel {
     width: 320px;
   }
+}
+
+/* Epoch time panel */
+.time-panel {
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.time-input-row {
+  display: flex;
+  gap: 6px;
+}
+
+.time-input-row .btn {
+  height: 30px;
+}
+
+.time-note {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.time-note.error {
+  color: var(--error);
+}
+
+.time-rows {
+  padding: 6px 0 0;
+}
+
+.zone-picker {
+  position: relative;
+}
+
+.zone-current {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+  font-family: var(--sans);
+  color: var(--text);
+  cursor: pointer;
+}
+
+/* The search box stays put; only the list under it scrolls. */
+.zone-menu {
+  left: 0;
+  right: 0;
+  max-height: none;
+  overflow: visible;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.zone-list {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.zone-list .dropdown-item.active {
+  background: var(--bg-hover);
+}
+
+.zone-list .dropdown-item.selected {
+  color: var(--accent);
+}
+
+.zone-long {
+  display: block;
+  font-size: 11px;
 }
 
 /* ---------------------------------------------------------- AI chat (beta) */
@@ -3576,4 +3679,20 @@ textarea.editable {
 .json-menu {
   position: fixed;
   z-index: 300;
+}
+
+/* ------------------------------------------------------------ XML formatter */
+
+.xml-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.xml-editor {
+  flex: 1;
+  min-height: 0;
 }

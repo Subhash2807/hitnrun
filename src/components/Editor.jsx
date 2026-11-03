@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useRef } from 'react';
 import CodeMirror from '@uiw/react-codemirror';
 import { json } from '@codemirror/lang-json';
 import { javascript } from '@codemirror/lang-javascript';
@@ -21,7 +21,13 @@ export default function Editor({
   wrap = true,
   theme = 'dark',
   height = '100%',
+  onSelectText = null,
 }) {
+  // Read through a ref, so a new callback each render doesn't rebuild the extensions.
+  const onSelectRef = useRef(onSelectText);
+  onSelectRef.current = onSelectText;
+  const listenSelection = !!onSelectText;
+
   const extensions = useMemo(() => {
     const ext = [];
     if (language === 'json') ext.push(json(), jsonFolding());
@@ -29,8 +35,18 @@ export default function Editor({
     else if (language === 'html') ext.push(html());
     else if (language === 'xml') ext.push(xml());
     if (wrap) ext.push(EditorView.lineWrapping);
+    if (listenSelection) {
+      ext.push(
+        EditorView.updateListener.of((update) => {
+          if (!update.selectionSet) return;
+          const { from, to } = update.state.selection.main;
+          // Only short selections: this is for picking out a value, not reading the body.
+          if (to > from && to - from <= 64) onSelectRef.current?.(update.state.sliceDoc(from, to));
+        })
+      );
+    }
     return ext;
-  }, [language, wrap]);
+  }, [language, wrap, listenSelection]);
 
   return (
     <div className="cm-wrap">
