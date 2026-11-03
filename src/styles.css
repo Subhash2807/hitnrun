@@ -3577,3 +3577,19 @@ textarea.editable {
   position: fixed;
   z-index: 300;
 }
+
+/* ------------------------------------------------------------ XML formatter */
+
+.xml-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.xml-editor {
+  flex: 1;
+  min-height: 0;
+}

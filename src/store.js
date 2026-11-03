@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { composeUrl } from './lib/url.js';
 import { beautifyIfValid } from './lib/jsonTree.mjs';
 import { responsePageName } from './lib/responseJson.mjs';
+import { prettyXmlOrSame } from './lib/xmlFormat.mjs';
 
 /**
  * Renderer-side store.
@@ -69,6 +70,17 @@ export function findRequest(state, id) {
   return null;
 }
 
+const XML_TEXT_KEY = 'hitnrun.xml.text';
+let xmlSaveTimer = null;
+
+function readLocal(key, fallback) {
+  try {
+    return localStorage.getItem(key) ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 export const useStore = create((set, get) => ({
   state: null,
   ready: false,
@@ -77,6 +89,8 @@ export const useStore = create((set, get) => ({
   responses: {},
   sending: {},
   progress: {},
+  // The XML formatter's text. Kept per machine, like a scratch pad.
+  xmlText: readLocal(XML_TEXT_KEY, ''),
   // requestId -> { state: 'synced'|'drifted'|'exempt'|'no-source', changes: [] }
   // Computed in the main process and pushed with every workspace change.
   syncStates: {},
@@ -550,9 +564,27 @@ export const useStore = create((set, get) => ({
 
   /* ------------------------------------------------------- JSON viewer */
 
-  /** 'requests' or 'json': which half of the app fills the window. */
+  /** 'requests', 'json' or 'xml': what fills the window. */
   setView(view) {
     if (get().state?.ui?.view !== view) get().patchUi({ view });
+  },
+
+  setXmlText(xmlText) {
+    set({ xmlText });
+    clearTimeout(xmlSaveTimer);
+    xmlSaveTimer = setTimeout(() => {
+      try {
+        localStorage.setItem(XML_TEXT_KEY, xmlText);
+      } catch { /* too big or no storage: it stays until the app closes */ }
+    }, 400);
+  },
+
+  /** Put text in the XML formatter, beautified when it can be, and switch to it. */
+  openInXml(text) {
+    const ui = get().state?.ui;
+    const indent = ui?.xmlIndent === 'tab' ? '\t' : ui?.xmlIndent ?? 2;
+    get().setXmlText(prettyXmlOrSame(String(text ?? ''), indent));
+    get().setView('xml');
   },
 
   toggleView() {

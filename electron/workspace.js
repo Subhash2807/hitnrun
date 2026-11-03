@@ -55,8 +55,8 @@ function normalizeUi(ui) {
   if (typeof ui.jsonActiveId !== 'string' || !ui.jsonTabs.includes(ui.jsonActiveId)) {
     ui.jsonActiveId = ui.jsonTabs.at(-1) ?? null;
   }
-  // Which half of the app fills the window: requests, or the JSON viewer.
-  if (ui.view !== 'json') ui.view = 'requests';
+  // What fills the window: requests, the JSON viewer, or the XML formatter.
+  if (ui.view !== 'json' && ui.view !== 'xml') ui.view = 'requests';
   return ui;
 }
 

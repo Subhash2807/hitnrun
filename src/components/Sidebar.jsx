@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useStore, api, walkRequests } from '../store.js';
 import Dropdown, { Item, Separator } from './Dropdown.jsx';
 import { SyncDot } from './SyncIndicator.jsx';
@@ -10,6 +10,7 @@ import {
   IconFolder, IconLayers, IconClock, IconTrash, IconCopy, IconSync, IconTerminal,
 } from './Icons.jsx';
 import { METHOD_COLORS, relativeTime, statusClass } from '../lib/format.js';
+import { searchTree, ancestorsOf } from '../lib/treeSearch.mjs';
 
 export default function Sidebar() {
   const state = useStore((s) => s.state);
@@ -59,30 +60,64 @@ export default function Sidebar() {
 
 /* ------------------------------------------------------------ collections */
 
+// Which collections and folders are open. Kept per machine, not in the
+// workspace, so opening a folder doesn't count as a change to it.
+const EXPANDED_KEY = 'hitnrun.sidebar.expanded';
+
+function loadExpanded() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(EXPANDED_KEY) || '{}');
+    return saved && typeof saved === 'object' && !Array.isArray(saved) ? saved : {};
+  } catch {
+    return {};
+  }
+}
+
 function CollectionsTree() {
   const state = useStore((s) => s.state);
+  const activeTabId = useStore((s) => s.state?.ui?.activeTabId);
   const call = useStore((s) => s.call);
   const createRequest = useStore((s) => s.createRequest);
   const syncContainer = useStore((s) => s.syncContainer);
   const openModal = useStore((s) => s.openModal);
   const [query, setQuery] = useState('');
-  const [collapsed, setCollapsed] = useState({});
-
-  const toggle = (id) => setCollapsed((c) => ({ ...c, [id]: !c[id] }));
-
-  const matches = useMemo(() => {
-    if (!query.trim()) return null;
-    const q = query.toLowerCase();
-    const ids = new Set();
-    for (const { request } of walkRequests(state)) {
-      if (request.name.toLowerCase().includes(q) || (request.url || '').toLowerCase().includes(q)) {
-        ids.add(request.id);
-      }
-    }
-    return ids;
-  }, [query, state]);
+  // Collections start open and folders start closed, until you open or close them.
+  const [expanded, setExpanded] = useState(loadExpanded);
+  // While searching, every folder with a match is open; these are the ones closed by hand.
+  const [searchClosed, setSearchClosed] = useState({});
 
   const collections = state?.collections || [];
+  const matches = useMemo(() => searchTree(collections, query), [collections, query]);
+  const searching = !!matches;
+
+  useEffect(() => setSearchClosed({}), [query]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(EXPANDED_KEY, JSON.stringify(expanded));
+    } catch { /* storage unavailable: the tree still works, it just won't be remembered */ }
+  }, [expanded]);
+
+  // Open the folders around the request in the active tab, so it can be seen in the tree.
+  useEffect(() => {
+    if (!activeTabId) return;
+    const trail = ancestorsOf(collections, activeTabId);
+    if (trail.some((id) => !expanded[id])) {
+      setExpanded((e) => ({ ...e, ...Object.fromEntries(trail.map((id) => [id, true])) }));
+    }
+    // Only when the active request changes, not every time a folder is closed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTabId]);
+
+  const isOpen = (id, isCollection = false) => {
+    if (searching) return !searchClosed[id];
+    return expanded[id] ?? isCollection;
+  };
+  const toggle = (id, isCollection = false) => {
+    if (searching) setSearchClosed((c) => ({ ...c, [id]: !c[id] }));
+    else setExpanded((e) => ({ ...e, [id]: !(e[id] ?? isCollection) }));
+  };
+
 
   return (
     <>
@@ -93,6 +128,7 @@ function CollectionsTree() {
             value={query}
             placeholder="Search requests"
             onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => e.key === 'Escape' && setQuery('')}
             spellCheck={false}
           />
         </div>
@@ -121,11 +157,15 @@ function CollectionsTree() {
           </div>
         )}
 
-        {collections.map((collection) => (
+        {searching && matches.requests.size === 0 && collections.length > 0 && (
+          <div className="tree-empty">No requests match "{query.trim()}".</div>
+        )}
+
+        {collections.map((collection) => (searching && !matches.containers.has(collection.id)) ? null : (
           <div key={collection.id}>
-            <div className="tree-row" onClick={() => toggle(collection.id)} style={{ paddingLeft: 4 }}>
+            <div className="tree-row" onClick={() => toggle(collection.id, true)} style={{ paddingLeft: 4 }}>
               <span className="tree-caret">
-                {collapsed[collection.id] ? <IconChevronRight width={12} height={12} /> : <IconChevronDown width={12} height={12} />}
+                {isOpen(collection.id, true) ? <IconChevronDown width={12} height={12} /> : <IconChevronRight width={12} height={12} />}
               </span>
               <span className="tree-label" style={{ fontWeight: 500 }}>{collection.name}</span>
               <div className="row-actions" onClick={(e) => e.stopPropagation()}>
@@ -167,8 +207,8 @@ function CollectionsTree() {
               </div>
             </div>
 
-            {!collapsed[collection.id] && (
-              <ItemList items={collection.items} depth={1} collapsed={collapsed} toggle={toggle} matches={matches} />
+            {isOpen(collection.id, true) && (
+              <ItemList items={collection.items} depth={1} isOpen={isOpen} toggle={toggle} matches={matches} />
             )}
           </div>
         ))}
@@ -177,27 +217,30 @@ function CollectionsTree() {
   );
 }
 
-function ItemList({ items, depth, collapsed, toggle, matches }) {
+function ItemList({ items, depth, isOpen, toggle, matches }) {
   return items.map((item) =>
     item.type === 'folder' ? (
-      <FolderRow key={item.id} folder={item} depth={depth} collapsed={collapsed} toggle={toggle} matches={matches} />
+      <FolderRow key={item.id} folder={item} depth={depth} isOpen={isOpen} toggle={toggle} matches={matches} />
     ) : (
       <RequestRow key={item.id} request={item} depth={depth} matches={matches} />
     )
   );
 }
 
-function FolderRow({ folder, depth, collapsed, toggle, matches }) {
+function FolderRow({ folder, depth, isOpen, toggle, matches }) {
   const call = useStore((s) => s.call);
   const createRequest = useStore((s) => s.createRequest);
   const syncContainer = useStore((s) => s.syncContainer);
   const openModal = useStore((s) => s.openModal);
 
+  // While searching, a folder with nothing matching inside it is left out.
+  if (matches && !matches.containers.has(folder.id)) return null;
+
   return (
     <div>
       <div className="tree-row" style={{ paddingLeft: depth * 14 }} onClick={() => toggle(folder.id)}>
         <span className="tree-caret">
-          {collapsed[folder.id] ? <IconChevronRight width={12} height={12} /> : <IconChevronDown width={12} height={12} />}
+          {isOpen(folder.id) ? <IconChevronDown width={12} height={12} /> : <IconChevronRight width={12} height={12} />}
         </span>
         <IconFolder width={12} height={12} className="dim" />
         <span className="tree-label">{folder.name}</span>
@@ -235,8 +278,8 @@ function FolderRow({ folder, depth, collapsed, toggle, matches }) {
           </Dropdown>
         </div>
       </div>
-      {!collapsed[folder.id] && (
-        <ItemList items={folder.items} depth={depth + 1} collapsed={collapsed} toggle={toggle} matches={matches} />
+      {isOpen(folder.id) && (
+        <ItemList items={folder.items} depth={depth + 1} isOpen={isOpen} toggle={toggle} matches={matches} />
       )}
     </div>
   );
@@ -251,7 +294,7 @@ function RequestRow({ request, depth, matches }) {
   const openModal = useStore((s) => s.openModal);
   const showToast = useStore((s) => s.showToast);
 
-  if (matches && !matches.has(request.id)) return null;
+  if (matches && !matches.requests.has(request.id)) return null;
 
   const copyCurl = async () => {
     const curl = await api.toCurl(request);
