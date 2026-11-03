@@ -56,6 +56,8 @@ Full releases only offer full releases; a beta also offers newer betas.
   as a date, in ISO 8601, in UTC and as "how long ago". Double-click a timestamp
   in a response to fill it in. The time zone you pick is remembered.
 - **Import Postman collections** from the **+** menu.
+- **Find a request** with the search box above the collections: it matches names,
+  URLs, methods and folder names, and opens the folders that hold a match.
 - **Auto-save.** There is no Save button; everything is saved as you type.
 
 ## Fix expired logins in one click
@@ -121,6 +123,20 @@ Numbers and text are kept exactly as written, so a long id like
 `12345678901234567890` is never rounded. Files save automatically. Closing a tab
 keeps the file in the sidebar list until you delete it.
 
+## Format and check XML
+
+Click **XML** at the top (or press `Ctrl+Shift+X`) to open the XML formatter.
+Paste XML, drop an `.xml` file on it, or use **Open in XML Formatter** next to
+an XML response.
+
+- **Beautify** (`Ctrl+Shift+F`) indents it, with 2 spaces, 4 or tabs; **Minify**
+  removes the whitespace between tags. Comments, CDATA, the declaration and
+  attribute values are kept exactly, and so is any element marked
+  `xml:space="preserve"`.
+- The bar at the bottom says whether the XML is well formed. If it isn't, it
+  says what is wrong and where; click it to go there.
+- The text is kept between runs. **Copy** and **Save** are top right.
+
 ## Ask AI (beta)
 
 Click **Ask AI** in the top bar (or press `Ctrl+L`) to chat about your APIs.
@@ -167,7 +183,8 @@ and look for `hitnrun`.
 | `Ctrl + Shift + C` | Copy as cURL |
 | `Ctrl + L` | Open or close Ask AI |
 | `Ctrl + J` | Switch between requests and the JSON viewer |
-| `Ctrl + Shift + F` | Beautify (in the JSON viewer) |
+| `Ctrl + Shift + X` | Switch between requests and the XML formatter |
+| `Ctrl + Shift + F` | Beautify (in the JSON viewer and the XML formatter) |
 | `Ctrl + Shift + S` | Screenshot into the recording (works from any app while recording) |
 | `Ctrl + =` / `Ctrl + -` / `Ctrl + 0` | Zoom in / out / reset |
 

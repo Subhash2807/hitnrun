@@ -293,6 +293,130 @@ const tmp = (label) => path.join(os.tmpdir(), `hitnrun-${label}-${Date.now()}-${
     assert.ok(E.searchZones('new york').some((z) => z.id === 'America/New_York'));
     assert.equal(E.currentZoneName('Asia/Calcutta'), 'Asia/Kolkata');
     assert.equal(E.isZone('Mars/Olympus_Mons'), false);
+  console.log('\nsidebar search');
+  const { searchTree, ancestorsOf, queryWords } = await import('../src/lib/treeSearch.mjs');
+  const req = (id, name, method, url) => ({ id, type: 'request', name, method, url });
+  const tree = [
+    {
+      id: 'c1', name: 'Shop API', items: [
+        { id: 'f1', type: 'folder', name: 'Users', items: [
+          req('r1', 'List users', 'GET', 'https://x/users'),
+          { id: 'f1a', type: 'folder', name: 'Admin', items: [req('r2', 'Ban', 'POST', 'https://x/admin/ban')] },
+        ] },
+        { id: 'f2', type: 'folder', name: 'Orders', items: [req('r3', 'Refund', 'POST', 'https://x/orders/1/refund')] },
+        req('r4', 'Health', 'GET', 'https://x/health'),
+      ],
+    },
+    { id: 'c2', name: 'Other', items: [{ id: 'f3', type: 'folder', name: 'Misc', items: [req('r5', 'Ping', 'GET', 'https://ping.dev')] }] },
+  ];
+
+  await test('a blank query is no search', () => {
+    assert.equal(searchTree(tree, ''), null);
+    assert.equal(searchTree(tree, '   '), null);
+    assert.deepEqual(queryWords('  A  b '), ['a', 'b']);
+  });
+
+  await test('a match deep in a folder opens every folder on the way, and only those', () => {
+    const m = searchTree(tree, 'ban');
+    assert.deepEqual([...m.requests], ['r2']);
+    assert.deepEqual([...m.containers].sort(), ['c1', 'f1', 'f1a']);
+  });
+
+  await test('names, URLs and methods match, case aside', () => {
+    assert.deepEqual([...searchTree(tree, 'REFUND').requests], ['r3']);
+    assert.deepEqual([...searchTree(tree, 'ping.dev').requests], ['r5']);
+    assert.deepEqual([...searchTree(tree, 'post').requests].sort(), ['r2', 'r3']);
+  });
+
+  await test("a folder's name finds what is inside it, and words combine", () => {
+    assert.deepEqual([...searchTree(tree, 'users').requests].sort(), ['r1', 'r2']);
+    assert.deepEqual([...searchTree(tree, 'users post').requests], ['r2']);
+    assert.deepEqual([...searchTree(tree, 'misc').containers].sort(), ['c2', 'f3']);
+  });
+
+  await test('no match leaves nothing to show', () => {
+    const m = searchTree(tree, 'nothing-like-this');
+    assert.equal(m.requests.size, 0);
+    assert.equal(m.containers.size, 0);
+  });
+
+  await test('missing names, URLs and items do not break the search', () => {
+    const odd = [{ id: 'c', name: undefined, items: [{ id: 'r', type: 'request' }, null, { id: 'f', type: 'folder' }] }];
+    assert.equal(searchTree(odd, 'x').requests.size, 0);
+    assert.equal(searchTree(odd, 'undefined').requests.size, 0);
+  });
+
+  await test('the folders around a request are found, outermost first', () => {
+    assert.deepEqual(ancestorsOf(tree, 'r2'), ['c1', 'f1', 'f1a']);
+    assert.deepEqual(ancestorsOf(tree, 'r4'), ['c1']);
+    assert.deepEqual(ancestorsOf(tree, 'nope'), []);
+  });
+
+  console.log('\nxml formatter');
+  const X = await import('../src/lib/xmlFormat.mjs');
+
+  await test('beautify indents elements and keeps text-only elements on one line', () => {
+    assert.equal(
+      X.formatXml('<a><b>1</b><c><d/></c></a>'),
+      '<a>\n  <b>1</b>\n  <c>\n    <d/>\n  </c>\n</a>'
+    );
+    assert.equal(X.formatXml('<a><b>1</b></a>', { indent: 4 }), '<a>\n    <b>1</b>\n</a>');
+    assert.equal(X.formatXml('<a><b>1</b></a>', { indent: '\t' }), '<a>\n\t<b>1</b>\n</a>');
+  });
+
+  await test('comments, CDATA, declarations and attribute values survive untouched', () => {
+    const doc = '<?xml version="1.0"?><!DOCTYPE a [<!ENTITY e "v">]><a  x="1 > 0"   y=\'q = r\'><!-- c --><b><![CDATA[<raw> & ]]></b></a>';
+    const out = X.formatXml(doc);
+    for (const piece of ['<?xml version="1.0"?>', '<!DOCTYPE a [<!ENTITY e "v">]>', '<a x="1 > 0" y=\'q = r\'>', '<!-- c -->', '<b><![CDATA[<raw> & ]]></b>']) {
+      assert.ok(out.includes(piece), `${piece} in\n${out}`);
+    }
+    assert.equal(X.formatXml(out), out, 'idempotent');
+  });
+
+  await test('minify removes only the whitespace between tags', () => {
+    assert.equal(X.formatXml('<a>\n  <b> x y </b>\n  <c/>\n</a>', { minify: true }), '<a><b> x y </b><c/></a>');
+  });
+
+  await test('mixed text and xml:space="preserve" keep their whitespace', () => {
+    assert.equal(X.formatXml('<r><p>Hi <b>you</b> !</p></r>'), '<r>\n  <p>Hi <b>you</b> !</p>\n</r>');
+    const pre = '<pre xml:space="preserve">  a\n   b </pre>';
+    assert.ok(X.formatXml(`<r>${pre}</r>`).includes(pre));
+  });
+
+  await test('problems are reported with where they are', () => {
+    const e = (t) => X.parseXml(t).error;
+    assert.deepEqual([e('<a>\n<b></a>').line, e('<a>\n<b></a>').col], [2, 4]);
+    assert.match(e('<a>\n<b></a>').message, /Expected <\/b> but found <\/a>/);
+    assert.match(e('<a>').message, /<a> is never closed/);
+    assert.match(e('<a x=1/>').message, /must be in quotes/);
+    assert.match(e('<a x="1" x="2"/>').message, /twice/);
+    assert.match(e('<a>1 < 2</a>').message, /&lt;/);
+    assert.match(e('<!-- x').message, /never closed/);
+    assert.match(e('</a>').message, /closes nothing/);
+    assert.equal(e('<a/>'), null);
+    assert.equal(e(''), null);
+  });
+
+  await test('two roots or stray text are invalid, but can still be formatted', () => {
+    const r = X.parseXml('<a/><b/>');
+    assert.equal(r.error.fatal, false);
+    assert.match(r.error.message, /More than one root/);
+    assert.equal(X.formatXml('<a/><b/>'), '<a/>\n<b/>');
+  });
+
+  await test('formatting broken XML throws with a line and column', () => {
+    assert.throws(() => X.formatXml('<a>\n<b>'), (err) => err.line === 2 && /never closed/.test(err.message));
+    assert.equal(X.prettyXmlOrSame('<a><b></a>'), '<a><b></a>');
+  });
+
+  await test('response bodies: tryPretty indents XML that holds text', async () => {
+    // The old pretty-printer lost track of depth after any element holding text.
+    const out = X.prettyXmlOrSame('<list><item>a</item><item>b</item><n><x>1</x></n></list>');
+    assert.equal(out, '<list>\n  <item>a</item>\n  <item>b</item>\n  <n>\n    <x>1</x>\n  </n>\n</list>');
+  });
+
+  await test('elements are counted', () => {
+    assert.equal(X.countElements(X.parseXml('<a><b/><c><d/></c></a>').nodes), 4);
   });
 
   console.log(`\n${passed} passed, ${failed} failed`);

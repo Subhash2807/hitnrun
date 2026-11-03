@@ -177,6 +177,7 @@ function buildMenu() {
       submenu: [
         { label: 'AI Assistant (Beta)', accelerator: 'CmdOrCtrl+L', click: emit('chat:toggle') },
         { label: 'JSON Viewer', accelerator: 'CmdOrCtrl+J', click: emit('view:json') },
+        { label: 'XML Formatter', accelerator: 'CmdOrCtrl+Shift+X', click: emit('view:xml') },
         { type: 'separator' },
         { role: 'reload' },
         { role: 'toggleDevTools' },

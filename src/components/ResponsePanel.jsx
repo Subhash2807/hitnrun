@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import Editor from './Editor.jsx';
-import { IconCopy, IconDownload, IconBraces } from './Icons.jsx';
+import { IconCopy, IconDownload, IconBraces, IconCode } from './Icons.jsx';
 import { api, useStore, findRequest } from '../store.js';
 import { AddToDocButton } from './DocsPanel.jsx';
 import { AskAiButton } from './ChatPanel.jsx';
@@ -149,6 +149,15 @@ export default function ResponsePanel({ requestId, result, sending, theme }) {
           >
             <IconBraces width={12} height={12} /> {openingJson ? 'Opening…' : 'Open in JSON Viewer'}
           </button>
+          {decoded?.language === 'xml' && (
+            <button
+              className="btn btn-sm"
+              title="Open this response in the XML formatter"
+              onClick={() => useStore.getState().openInXml(decoded.text)}
+            >
+              <IconCode width={12} height={12} /> Open in XML Formatter
+            </button>
+          )}
           <button className="icon-btn" title="Copy response body" onClick={copyBody}>
             <IconCopy />
           </button>
