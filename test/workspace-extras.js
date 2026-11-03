@@ -421,6 +421,45 @@ const tmp = (label) => path.join(os.tmpdir(), `hitnrun-${label}-${Date.now()}-${
     assert.equal(X.countElements(X.parseXml('<a><b/><c><d/></c></a>').nodes), 4);
   });
 
+  console.log('\nkey headers');
+  const K = await import('../src/lib/keyHeaders.mjs');
+  const kh = (headers) => ({ headers: headers.map(([key, value, enabled = true]) => ({ key, value, enabled })) });
+
+  await test('only the key headers present are found, in a fixed order, any case', () => {
+    const req = kh([['TenantName', 'acme'], ['Accept', '*/*'], ['dealerid', '104857']]);
+    const found = K.findKeyHeaders(req);
+    assert.deepEqual(found.map((h) => [h.name, h.value, h.index]), [['dealerid', '104857', 2], ['TenantName', 'acme', 0]]);
+    assert.deepEqual(K.findKeyHeaders(kh([['Accept', '*/*']])), []);
+    assert.deepEqual(K.findKeyHeaders({}), []);
+  });
+
+  await test('disabled key headers are not sent, so they are left out', () => {
+    assert.deepEqual(K.findKeyHeaders(kh([['dealerId', '1', false]])), []);
+  });
+
+  await test('values resolve like a send: environment over collection over globals', () => {
+    const state = {
+      globals: [{ key: 'tenant', value: 'global-t' }, { key: 'sbx', value: 'sbx-g' }],
+      environments: [{ id: 'e1', values: [{ key: 'tenant', value: 'env-t' }, { key: 'off', value: 'x', enabled: false }] }],
+      activeEnvironmentId: 'e1',
+    };
+    const scope = K.variableScope(state, { variables: [{ key: 'sbx', value: 'sbx-{{tenant}}' }] });
+    const found = K.findKeyHeaders(kh([['tek-sandbox-id', '{{sbx}}'], ['dealerId', '{{off}}'], ['tenantname', '{{tenant}}']]), scope);
+    assert.deepEqual(found.map((h) => [h.value, h.missing]), [['sbx-env-t', []], ['{{off}}', ['off']], ['env-t', []]]);
+    assert.equal(found[0].raw, '{{sbx}}');
+  });
+
+  await test('dynamic values are not reported as missing', () => {
+    assert.deepEqual(K.resolveValue('{{$guid}}', new Map()).missing, []);
+  });
+
+  await test('editing a value replaces only that row', () => {
+    const req = kh([['dealerId', '1'], ['tenantname', 'a']]);
+    const next = K.setHeaderValue(req, 1, 'b');
+    assert.deepEqual(next.map((h) => h.value), ['1', 'b']);
+    assert.equal(req.headers[1].value, 'a');
+  });
+
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 })();

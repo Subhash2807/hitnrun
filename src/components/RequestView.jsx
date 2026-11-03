@@ -7,6 +7,7 @@ import Editor from './Editor.jsx';
 import ResponsePanel from './ResponsePanel.jsx';
 import Dropdown, { Item, Separator } from './Dropdown.jsx';
 import SyncIndicator from './SyncIndicator.jsx';
+import KeyHeaders from './KeyHeaders.jsx';
 import { SideRail, SidePanel } from './SidePanel.jsx';
 import {
   IconMore, IconCopy, IconTerminal, IconChevronDown, IconSync, IconSplitRight, IconSplitBelow, IconCode,
@@ -170,6 +171,7 @@ export default function RequestView({ requestId, theme }) {
             />
             <span className="breadcrumb">saved automatically</span>
             <div className="grow" />
+            <KeyHeaders requestId={requestId} />
             <SyncIndicator requestId={requestId} />
             <button
               className="icon-btn"

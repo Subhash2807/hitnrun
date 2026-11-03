@@ -150,6 +150,15 @@ export const IconInfo = make(
     <line x1="12" y1="8" x2="12.01" y2="8" />
   </>
 );
+export const IconBadge = make(
+  <>
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <circle cx="9" cy="11" r="2" />
+    <path d="M6 16.5c.6-1.5 1.7-2.2 3-2.2s2.4.7 3 2.2" />
+    <line x1="15" y1="10" x2="18" y2="10" />
+    <line x1="15" y1="14" x2="18" y2="14" />
+  </>
+);
 export const IconGrip = make(
   <>
     <circle cx="9" cy="6" r="1" fill="currentColor" />
